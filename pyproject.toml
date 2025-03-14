@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flowrl"
+version = "1.0.0"
+authors = [
+  { name="Renos Zabounidis", email="renosz@cs.cmu.edu" },
+]
+description = "Flow based RL agents"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "jax",
+    "distrax",
+    "optax",
+    "flax",
+    "numpy",
+    "black==23.3.0",
+    "pre-commit==3.3.3",
+    "argparse",
+    "wandb",
+    "orbax-checkpoint",
+    "pygame",
+    "gymnax",
+    "chex",
+    "matplotlib",
+    "imageio",
+]
+
+[tool.setuptools.packages.find]
+where=["flowrl"]

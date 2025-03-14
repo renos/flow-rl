@@ -1,0 +1,5 @@
+*.nsys-rep
+exp/
+*.pyc
+wandb/
+*.egg-info
