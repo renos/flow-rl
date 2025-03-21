@@ -1,8 +1,12 @@
+from flowrl.utils.test import load_policy_params
 import jax
+
 jax.config.update("jax_compilation_cache_dir", "/data/renos/jax_cache/")
 jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
-jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
+jax.config.update(
+    "jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir"
+)
 
 
 import argparse
@@ -40,6 +44,7 @@ from .wrappers import (
     AutoResetEnvWrapper,
 )
 import importlib
+
 # Code adapted from the original implementation made by Chris Lu
 # Original code located at https://github.com/luchris429/purejaxrl
 
@@ -56,7 +61,7 @@ class Transition(NamedTuple):
     player_state: jnp.ndarray
 
 
-def make_train(config):
+def make_train(config, prev_model_state=None):
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     )
@@ -82,7 +87,6 @@ def make_train(config):
         config["ENV_NAME"], not config["USE_OPTIMISTIC_RESETS"], module_dict
     )
     env_params = env.default_params
-
 
     heads, num_heads = env.heads_info
     heads = list(heads)
@@ -117,15 +121,27 @@ def make_train(config):
         )
         return config["LR"] * frac
 
+    if prev_model_state is not None:
+        prev_state = prev_model_state
+    else:
+        prev_state = {}
+
+    def param_updater(new_state):
+        if "params" not in prev_state:
+            return new_state
+        for key, value in prev_state["params"]["params"].items():
+            new_state["params"][key] = value
+        return new_state
+
     def train(rng):
         # INIT NETWORK
         if "Symbolic" in config["ENV_NAME"]:
-            #network = ActorCritic(env.action_space(env_params).n, config["LAYER_SIZE"])
+            # network = ActorCritic(env.action_space(env_params).n, config["LAYER_SIZE"])
             network = ActorCriticMoE(
                 action_dim=env.action_space(env_params).n,
                 layer_width=config["LAYER_SIZE"],
                 num_layers=4,
-                num_tasks=num_tasks
+                num_tasks=num_tasks,
             )
         else:
             # network = ActorCriticConv(
@@ -137,6 +153,9 @@ def make_train(config):
         init_x = jnp.zeros((1, *env.observation_space(env_params).shape))
         init_states = jnp.zeros((1,), dtype=jnp.int32)
         network_params = network.init(_rng, init_x, init_states)
+        network_params = jax.pure_callback(
+            param_updater, network_params, network_params
+        )
         if config["ANNEAL_LR"]:
             tx = optax.chain(
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
@@ -154,7 +173,6 @@ def make_train(config):
         )
 
         ex_state = {}
-
 
         # INIT ENV
         rng, _rng = jax.random.split(rng)
@@ -189,7 +207,6 @@ def make_train(config):
                     _rng, env_state, action, env_params
                 )
                 done = info["task_done"]
-
 
                 transition = Transition(
                     done=done,
@@ -358,18 +375,21 @@ def make_train(config):
             )
 
             train_state = update_state[0]
+
             def process(x, returned_episode, is_special=False, is_nearest=False):
-                #reached_ep = returned_episode
+                # reached_ep = returned_episode
                 reached_ep = traj_batch.player_state == config["SUCCESS_STATE_INDEX"]
                 if is_nearest:
-                    #mask_seen = (x[:, :, :, 0, :] < 30) and (x[:, :, :, 1, :] < 30)
-                    mask_seen = jnp.logical_and(x[:, :, :, 0, :] < 30, x[:, :, :, 1, :] < 30)
+                    # mask_seen = (x[:, :, :, 0, :] < 30) and (x[:, :, :, 1, :] < 30)
+                    mask_seen = jnp.logical_and(
+                        x[:, :, :, 0, :] < 30, x[:, :, :, 1, :] < 30
+                    )
                     return (mask_seen * reached_ep[:, :, None, None]).sum(
                         axis=(0, 1)
                     ) / reached_ep.sum()
                 elif is_special:
                     # Reshape returned_episode to match the dimensions of x for broadcasting
-                    #also we want returned episode to track the success rates directly 
+                    # also we want returned episode to track the success rates directly
                     return (x * returned_episode[:, :, None]).sum(
                         axis=(0, 1)
                     ) / returned_episode.sum()
@@ -429,6 +449,7 @@ def make_train(config):
             _rng,
             0,
         )
+
         # runner_state, metric = jax.lax.scan(
         #     _update_step, runner_state, None, config["NUM_UPDATES"]
         # )
@@ -447,14 +468,18 @@ def make_train(config):
             success_state_rate = metric["reached_state"][config["SUCCESS_STATE_INDEX"]]
             return i + 1, runner_state, success_state_rate, metric
 
-
-
         # Execute the while loop
         runner_state, metric = _update_step(runner_state, None)
         # Initialize the loop carry
         initial_carry = (0, runner_state, 0, metric)
-        num_steps, runner_state, success_rate, metric = jax.lax.while_loop(cond_fun, body_fun, initial_carry)
-        return {"runner_state": runner_state, "num_steps": num_steps, "info" : metric}  # , "info": metric}
+        num_steps, runner_state, success_rate, metric = jax.lax.while_loop(
+            cond_fun, body_fun, initial_carry
+        )
+        return {
+            "runner_state": runner_state,
+            "num_steps": num_steps,
+            "info": metric,
+        }  # , "info": metric}
 
     return train
 
@@ -472,12 +497,36 @@ def run_ppo(config, training_state_i=2):
             + str(int(config["TOTAL_TIMESTEPS"] // 1e6))
             + "M",
         )
-    
+
     rng = jax.random.PRNGKey(config["SEED"])
     rngs = jax.random.split(rng, config["NUM_REPEATS"])
     config["SUCCESS_STATE_INDEX"] = training_state_i
 
-    train_jit = jax.jit(make_train(config))
+    def restore_model(path):
+        config_path = f"{path}/config.yaml"
+        with open(config_path, "r") as f:
+            config = yaml.load(f, Loader=yaml.FullLoader)
+        config = {
+            k.upper(): v["value"] if type(v) == dict and "value" in v else v
+            for k, v in config.items()
+        }
+        network = make_train(config, return_test_network=True)
+        train_state = load_policy_params(path)
+
+        return network, train_state
+
+    if "PREV_MODULE_PATH" in config and config["PREV_MODULE_PATH"]:
+        directory, file_name = os.path.split(config["PREV_MODULE_PATH"])
+        # Remove the .py extension from the file name
+        file_name_without_extension = os.path.splitext(file_name)[0]
+        new_directory = os.path.join(
+            directory, f"{file_name_without_extension}_policies"
+        )
+        _, train_state = restore_model(new_directory)
+    else:
+        train_state = None
+
+    train_jit = jax.jit(make_train(config, prev_model_state=train_state))
     train_vmap = jax.vmap(train_jit)
 
     t0 = time.time()
@@ -487,7 +536,6 @@ def run_ppo(config, training_state_i=2):
     print("Time to run experiment", t1 - t0)
     print("SPS: ", config["TOTAL_TIMESTEPS"] / (t1 - t0))
     success_rate = float(out["info"]["reached_state"][0][training_state_i])
-
 
     def _save_network(rs_index, dir_name):
         train_states = out["runner_state"][rs_index]
@@ -578,8 +626,10 @@ if __name__ == "__main__":
     parser.add_argument("--use_e3b", action="store_true")
     parser.add_argument("--e3b_lambda", type=float, default=0.1)
 
-    #Flow Params
-    parser.add_argument("--module_path", type=str, default="/home/renos/flow-rl/exp/premade/1.py")
+    # Flow Params
+    parser.add_argument(
+        "--module_path", type=str, default="/home/renos/flow-rl/exp/premade/1.py"
+    )
     # what sucdess rate to achieve before optimizing next node
     parser.add_argument("--success_state_rate", type=float, default=0.8)
 
@@ -592,15 +642,16 @@ if __name__ == "__main__":
         assert args.icm_reward_coeff == 0
     if args.seed is None:
         args.seed = np.random.randint(2**31)
-    import jax
-    from jax import profiler
 
-     # 1. Create a trace directory to save profiling results
+    # import jax
+    # from jax import profiler
 
-    trace_dir = "/home/renos/tensorboard"
-    with profiler.trace(trace_dir, create_perfetto_link=True):
-        if args.jit:
+    # 1. Create a trace directory to save profiling results
+
+    # trace_dir = "/home/renos/tensorboard2"
+    # with profiler.trace(trace_dir, create_perfetto_link=True):
+    if args.jit:
+        run_ppo(args)
+    else:
+        with jax.disable_jit():
             run_ppo(args)
-        else:
-            with jax.disable_jit():
-                run_ppo(args)

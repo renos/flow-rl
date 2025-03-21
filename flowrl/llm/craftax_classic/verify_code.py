@@ -3,10 +3,10 @@ import os
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 import jax
-from environment_base.wrappers import AutoResetEnvWrapper
+from flowrl.wrappers import AutoResetEnvWrapper
 
-from craftax_classic.envs.craftax_symbolic_env import (
-    CraftaxClassicSymbolicEnv as CraftaxEnv,
+from craftax.craftax_classic.envs.craftax_symbolic_env import (
+    CraftaxClassicSymbolicEnvNoAutoReset as CraftaxEnv,
 )
 import numpy as np
 from jax import jit
@@ -39,8 +39,8 @@ achievements_diff = state.achievements_diff
 def verify_function(functions):
     # assuming functions have both reward and is_done
     namespace = {}
-    exec("from craftax_classic.constants import *", namespace)
-    exec("from craftax_classic.envs.craftax_state import  Inventory", namespace)
+    exec("from craftax.craftax_classic.constants import *", namespace)
+    exec("from craftax.craftax_classic.envs.craftax_state import  Inventory", namespace)
     for function in functions:
         exec(function, namespace)
 

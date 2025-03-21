@@ -11,3 +11,6 @@ wandb
 pillow
 imageio
 moviepy
+openai
+tiktoken
+opencv-python

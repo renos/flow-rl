@@ -18,16 +18,19 @@ def matmul_kernel(
     # Pointers to matrices
     a_ptr,
     b_ptr,
+    batch_idx,
     c_ptr,
     # Matrix dimensions
     M,
     N,
     K,
+    T,
     # The stride variables represent how much to increase the ptr by when moving by 1
     # element in a particular dimension. E.g. `stride_am` is how much to increase `a_ptr`
     # by to get the element one row down (A has M rows).
     stride_am,
     stride_ak,  #
+    stride_bt,
     stride_bk,
     stride_bn,  #
     stride_cm,
@@ -120,7 +123,7 @@ def matmul(a: jnp.ndarray, b: jnp.ndarray, activation: str = "") -> jnp.ndarray:
     """
     # Extract matrix dimensions
     M, K = a.shape
-    K_, N = b.shape
+    T, K_, N = b.shape
     assert K == K_, f"Incompatible dimensions: {a.shape} and {b.shape}"
 
     # Prepare output shape - same precision as inputs
@@ -137,8 +140,9 @@ def matmul(a: jnp.ndarray, b: jnp.ndarray, activation: str = "") -> jnp.ndarray:
     a_stride_row = K  # Number of elements to skip to move down one row in A
     a_stride_col = 1  # Number of elements to skip to move right one column in A
 
-    b_stride_row = N  # Number of elements to skip to move down one row in B
-    b_stride_col = 1  # Number of elements to skip to move right one column in B
+    b_stride_batch = T * N  # Elements to skip between batches
+    b_stride_row = N  # Elements to skip between rows within a batch
+    b_stride_col = 1  # Elements to skip between columns within a row
 
     # For the output, similar logic applies
     c_stride_row = N  # Number of elements to skip to move down one row in C
@@ -153,13 +157,16 @@ def matmul(a: jnp.ndarray, b: jnp.ndarray, activation: str = "") -> jnp.ndarray:
     return jt.triton_call(
         a,
         b,  # matrices a and b
+        batch_idx=0,
         # Matrix dimensions
         M=M,
         N=N,
         K=K,
+        T=T,
         # Strides
         stride_am=a_stride_row,
         stride_ak=a_stride_col,  #
+        stride_bt=b_stride_batch,
         stride_bk=b_stride_row,
         stride_bn=b_stride_col,  #
         stride_cm=c_stride_row,
@@ -185,8 +192,9 @@ def matmul_leaky_relu(a: jnp.ndarray, b: jnp.ndarray) -> jnp.ndarray:
 
 # Create sample matrices
 M, K, N = 1024, 1024, 1024
+T = 20
 a = jnp.ones((M, K), dtype=jnp.float16)
-b = jnp.ones((K, N), dtype=jnp.float16)
+b = jnp.ones((T, K, N), dtype=jnp.float16)
 
 # Run the matrix multiplication
 c = matmul(a, b)
@@ -203,38 +211,3 @@ import numpy as np
 
 np.testing.assert_allclose(a @ b, c_jit, rtol=1e-5, atol=1e-5)
 print(f"JIT output shape: {c_jit.shape}")
-
-
-M, K, N = 64, 64, 64
-key = jax.random.key(0)
-key1, key2 = jax.random.split(key)
-a = jax.random.normal(key1, (M, K), dtype=jnp.float32)
-b = jax.random.normal(key2, (K, N), dtype=jnp.float32)
-
-
-# Define a simple loss function
-def loss_fn(a):
-    return jnp.sum(matmul(a, b))
-
-
-try:
-    # Try to compute gradient with respect to 'a'
-    grad_a = jax.grad(loss_fn)(a)
-    print("Gradient computation successful!")
-    print(f"Gradient shape: {grad_a.shape}")
-    print(f"Gradient example values: {grad_a[0, 0:5]}")
-
-    # Verify against standard JAX matmul for comparison
-    def ref_loss_fn(a):
-        return jnp.sum(a @ b)
-
-    ref_grad_a = jax.grad(ref_loss_fn)(a)
-    grad_match = jnp.allclose(grad_a, ref_grad_a, rtol=1e-4, atol=1e-4)
-    print(f"Gradients match JAX reference: {grad_match}")
-
-    if not grad_match:
-        max_diff = jnp.max(jnp.abs(grad_a - ref_grad_a))
-        print(f"Maximum difference: {max_diff}")
-
-except Exception as e:
-    print(f"Error computing gradient: {e}")

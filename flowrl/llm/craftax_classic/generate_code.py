@@ -82,17 +82,21 @@ def validate_code(generated_code):
 def generate_validated_py(functions, file_path, task_num):
     if task_num == 0:
         with open(file_path, "w") as f:
-            f.write("from craftax_classic.constants import *\n")
-            f.write("from craftax_classic.envs.craftax_state import Inventory\n")
+            f.write("from craftax.craftax_classic.constants import *\n")
+            f.write(
+                "from craftax.craftax_classic.envs.craftax_state import Inventory\n"
+            )
             f.write("import jax\n")
-    
+
     all_functions = ""
     for i in range(3):
         all_functions += f"{functions[i]}\n"
 
     functions[0] = functions[0].replace("task_is_done", f"task_{task_num}_is_done")
     functions[1] = functions[1].replace("task_reward", f"task_{task_num}_reward")
-    functions[2] = functions[2].replace("task_network_number", f"task_{task_num}_network_number")
+    functions[2] = functions[2].replace(
+        "task_network_number", f"task_{task_num}_network_number"
+    )
 
     with open(file_path, "a") as f:
         f.write(functions[0] + "\n")
@@ -142,7 +146,7 @@ from typing import Tuple
 #         )
 
 
-#@struct.dataclass
+# @struct.dataclass
 # class Inventory:
 #     wood: int = 0
 #     stone: Tuple[int, ...] = field(default_factory=lambda: tuple(0 for _ in range(10)))
@@ -178,6 +182,7 @@ from typing import Tuple
 #             mean_num = round(sum(i * p for i, p in enumerate(lst)), 1)
 #             return f"{name}: {mean_num}"
 
+
 #         return (
 #             "Inventory:\n"
 #             f"{format_item('wood', self.wood)}\n"
@@ -207,6 +212,7 @@ class Inventory:
     wood_sword: int = 0
     stone_sword: int = 0
     iron_sword: int = 0
+
 
 def create_inventory_from_array(inventory_array):
     return Inventory(

@@ -1,5 +1,5 @@
-from flowrl.llm.craftax_classic.compose_prompts import ComposeReasoningPrompt
-from flowrl.llm.craftax_classic.post_processing import *
+from flowrl.llm.compose_prompts import ComposeReasoningPrompt
+from flowrl.llm.craftax_classic.after_queries import *
 
 
 def return_prompts(LLM_API_FUNCTION_GPT4):
@@ -486,8 +486,8 @@ No need to add coefficents to rewards, for example, no need for 10 * inventory_d
 Return all three functions in a single code block, don't seperate it into 3.
 No need to return the docstrings.
 Your code will be pasted into a file that already has the following imports. Do not add any additional imports.
-from craftax_classic.constants import *
-from craftax_classic.envs.craftax_state import Inventory
+from craftax.craftax_classic.constants import *
+from craftax.craftax_classic.envs.craftax_state import Inventory
 import jax
         """,
         "dep": [],

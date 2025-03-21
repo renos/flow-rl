@@ -1,8 +1,5 @@
-from flowrl.llm.craftax_classic.compose_prompts import ComposeReasoningPrompt
-from flowrl.llm.craftax_classic.post_processing import *
-
-
-
+from flowrl.llm.compose_prompts import ComposeReasoningPrompt
+from flowrl.llm.craftax_classic.after_queries import *
 
 
 def return_prompts(LLM_API_FUNCTION_GPT4):
