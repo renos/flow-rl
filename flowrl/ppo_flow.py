@@ -59,9 +59,10 @@ class Transition(NamedTuple):
     next_obs: jnp.ndarray
     info: jnp.ndarray
     player_state: jnp.ndarray
+    inventory: jnp.ndarray
 
 
-def make_train(config, prev_model_state=None):
+def make_train(config, prev_model_state=None, return_test_network=False):
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     )
@@ -132,6 +133,15 @@ def make_train(config, prev_model_state=None):
         for key, value in prev_state["params"]["params"].items():
             new_state["params"][key] = value
         return new_state
+
+    if return_test_network:
+        network = ActorCriticMoE(
+            action_dim=env.action_space(env_params).n,
+            layer_width=config["LAYER_SIZE"],
+            num_layers=4,
+            num_tasks=num_tasks,
+        )
+        return network
 
     def train(rng):
         # INIT NETWORK
@@ -218,6 +228,7 @@ def make_train(config, prev_model_state=None):
                     next_obs=obsv,
                     info=info,
                     player_state=player_state,
+                    inventory=inv,
                 )
                 runner_state = (
                     train_state,
@@ -415,6 +426,33 @@ def make_train(config, prev_model_state=None):
             state_rates = state_occurrences / total_weights
             metric["state_rates"] = state_rates
 
+            # inventory when done
+            # inventory = jnp.array(
+            #     [
+            #         traj_batch.inventory.wood,
+            #         traj_batch.inventory.stone,
+            #         traj_batch.inventory.coal,
+            #         traj_batch.inventory.iron,
+            #         traj_batch.inventory.diamond,
+            #         traj_batch.inventory.sapling,
+            #         traj_batch.inventory.wood_pickaxe,
+            #         traj_batch.inventory.stone_pickaxe,
+            #         traj_batch.inventory.iron_pickaxe,
+            #         traj_batch.inventory.wood_sword,
+            #         traj_batch.inventory.stone_sword,
+            #         traj_batch.inventory.iron_sword,
+            #     ]
+            # ).astype(jnp.float16)
+            flat_values, _ = jax.tree_util.tree_flatten(traj_batch.inventory)
+            # Convert the flattened values to a single array
+            inventory = jnp.array(flat_values).astype(jnp.float16)
+            # done_point = traj_batch.done
+            done_point = traj_batch.player_state == config["SUCCESS_STATE_INDEX"]
+            avg_item = (
+                jax.nn.one_hot(inventory, num_classes=10) * done_point[None, ..., None]
+            ).sum(axis=(-3, -2)) / done_point.sum()
+            metric["average_item"] = avg_item
+
             rng = update_state[-1]
 
             # wandb logging
@@ -510,10 +548,9 @@ def run_ppo(config, training_state_i=2):
             k.upper(): v["value"] if type(v) == dict and "value" in v else v
             for k, v in config.items()
         }
-        network = make_train(config, return_test_network=True)
         train_state = load_policy_params(path)
 
-        return network, train_state
+        return train_state
 
     if "PREV_MODULE_PATH" in config and config["PREV_MODULE_PATH"]:
         directory, file_name = os.path.split(config["PREV_MODULE_PATH"])
@@ -522,7 +559,7 @@ def run_ppo(config, training_state_i=2):
         new_directory = os.path.join(
             directory, f"{file_name_without_extension}_policies"
         )
-        _, train_state = restore_model(new_directory)
+        train_state = restore_model(new_directory)
     else:
         train_state = None
 
@@ -567,7 +604,7 @@ def run_ppo(config, training_state_i=2):
     else:
         assert 0, "should be in module path"
 
-    return out, success_rate > 0.1
+    return out, success_rate > config["SUCCESS_STATE_RATE"]
 
 
 if __name__ == "__main__":

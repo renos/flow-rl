@@ -28,8 +28,8 @@ class Flow:
         self.args = args
         self.graph_path = Path(args.graph_path)
         if args.env_name == "Craftax-Classic-Symbolic-v1":
-            self.db, self.graph, self.inventory_graph = generate_graph(
-                return_inventory_graph=True
+            self.db, self.graph, self.inventory_graph, self.reuse_graph = (
+                generate_graph(return_inventory_graph=True)
             )
         else:
             assert 0, f"Not Implemented"
@@ -38,6 +38,7 @@ class Flow:
         self.previous_i = args.previous_i
 
         self.nodes = []
+        self.old_nodes = None
 
         # Load previous db if specified
         if self.previous_i is not None and self.previous_i >= 0:
@@ -99,16 +100,16 @@ class Flow:
         # else:
         #     assert 0, "Error generating code"
 
-    def write_code(self, next_node):
+    def write_code(self):
 
-        nodes_plus_next = self.nodes.copy()
-        nodes_plus_next.append(next_node)
+        nodes = self.nodes.copy()
+        save_dir = self.graph_path / str(self.current_i)
+        save_dir.mkdir(parents=True, exist_ok=True)
 
-        breakpoint()
-        self.current_i = len(nodes_plus_next) - 1
-        for i in range(len(nodes_plus_next)):
+        self.current_i = len(nodes) - 1
+        for i in range(len(nodes)):
             generate_validated_py(
-                nodes_plus_next[i],
+                nodes[i],
                 os.path.join(
                     self.graph_path / str(self.current_i), f"{self.current_i}.py"
                 ),
@@ -159,3 +160,23 @@ class Flow:
 
         self.inventory_graph.evaluate()
         return self.db["current"]["missing_resources"]
+
+    def precollect_resources(self, missing_resources):
+        """Pre-collect resources needed for the next node"""
+        self.old_nodes = self.nodes.copy()
+        for name, quantity in missing_resources.items():
+            self.db["missing_resource"] = f"{name}: {quantity}"
+            error = "Not generated yet"
+            while error != "":
+                evaluated = self.reuse_graph.evaluate()
+                generated_code = evaluated[list(evaluated.keys())[-1]]
+                functions, error = validate_code(generated_code)
+                breakpoint()
+                self.nodes.insert(-1, generated_code)
+                if error != "":
+                    print(f"Error generating: {error}")
+
+            # if resource in self.db["current"]["inventory"]:
+            #     self.db["current"]["inventory"][resource] += 1
+            # else:
+            #     print(f"Resource {resource} not found in inventory")

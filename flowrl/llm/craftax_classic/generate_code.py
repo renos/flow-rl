@@ -92,16 +92,22 @@ def generate_validated_py(functions, file_path, task_num):
     for i in range(3):
         all_functions += f"{functions[i]}\n"
 
-    functions[0] = functions[0].replace("task_is_done", f"task_{task_num}_is_done")
-    functions[1] = functions[1].replace("task_reward", f"task_{task_num}_reward")
-    functions[2] = functions[2].replace(
+    # Create copies of the functions to avoid modifying the original list
+    modified_functions = functions.copy()
+    modified_functions[0] = functions[0].replace(
+        "task_is_done", f"task_{task_num}_is_done"
+    )
+    modified_functions[1] = functions[1].replace(
+        "task_reward", f"task_{task_num}_reward"
+    )
+    modified_functions[2] = functions[2].replace(
         "task_network_number", f"task_{task_num}_network_number"
     )
 
     with open(file_path, "a") as f:
-        f.write(functions[0] + "\n")
-        f.write(functions[1] + "\n")
-        f.write(functions[2] + "\n")
+        f.write(modified_functions[0] + "\n")
+        f.write(modified_functions[1] + "\n")
+        f.write(modified_functions[2] + "\n")
     return all_functions
 
 

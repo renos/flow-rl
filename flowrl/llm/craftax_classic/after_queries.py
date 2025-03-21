@@ -44,6 +44,35 @@ class SubtaskAfterQuery(aq.JsonAfterQuery):
         self.node.db["current"]["subtask"] = parsed_answer
 
 
+class ReuseSkill(aq.JsonAfterQuery):
+
+    def __init__(self):
+        super().__init__()
+        self.type = dict
+        self.required_keys = [
+            "reuse_skill",
+            "reused_skill",
+        ]
+        # self.length = len(self.keys)
+
+    def post_process(self):
+
+        parsed_answer = self.parse_json()[-1]
+
+        self.node.db["current"]["subtask"]["reuse_skill"] = parsed_answer["reuse_skill"]
+
+        # add the relevant branch
+        if parsed_answer["reuse_skill"]:
+            # self.node.graph.skip_nodes_temporary([self.node.db["prompts"]["create_skill_reward_reasoning"]["prompt"], self.node.db["prompts"]["create_skill_coding"]["prompt"]])
+            # self.node.graph.add_temporary_node(SimpleDBNode(questions, questions, self.node.graph, self.node.query_llm, ComposePlannerPrompt(), self.node.db))
+            # self.node.graph.add_temporary_node(SimpleDBNode(questions, questions, self.node.graph, self.node.query_llm, ComposePlannerPrompt(), self.node.db))
+            query = "reuse"
+            self.node.db["current"]["skill_reused"] = self.node.db["skills"][
+                parsed_answer["reused_skill"]
+            ]
+            self.node.db["current"]["skill_reused_name"] = parsed_answer["reused_skill"]
+
+
 class ReuseOrGenerateNewSkill(aq.JsonAfterQuery):
 
     def __init__(self):
@@ -70,6 +99,7 @@ class ReuseOrGenerateNewSkill(aq.JsonAfterQuery):
             self.node.db["current"]["skill_reused"] = self.node.db["skills"][
                 parsed_answer["reused_skill"]
             ]
+            self.node.db["current"]["skill_reused_name"] = parsed_answer["reused_skill"]
         else:
             # self.node.db["prompts"]["reflection_skip_questions"]
             # self.node.graph.skip_nodes_temporary([self.node.db["prompts"]["reuse_skill_task_reasoning"]["prompt"], self.node.db["prompts"]["reuse_skill_coding"]["prompt"]])
@@ -136,10 +166,7 @@ class InventoryAfterQuery(aq.JsonAfterQuery):
     def __init__(self):
         super().__init__()
         self.type = dict
-        self.required_keys = [
-            "subtask_name",
-            "resources_required"
-        ]
+        self.required_keys = ["subtask_name", "resources_required"]
         # self.length = len(self.keys)
 
     def post_process(self):
@@ -148,25 +175,23 @@ class InventoryAfterQuery(aq.JsonAfterQuery):
         subtask_name = parsed_answer["subtask_name"]
         resources_required = parsed_answer["resources_required"]
 
-        self.node.db["knowledge_base"][subtask_name] = {"resources_required": resources_required}
+        self.node.db["knowledge_base"][subtask_name] = {
+            "resources_required": resources_required
+        }
         self.node.db["current"]["resources_required"] = resources_required
+
 
 class MissingItemsAfterQuery(aq.JsonAfterQuery):
     def __init__(self):
         super().__init__()
         self.type = dict
-        self.required_keys = [
-            "subtask_name",
-            "missing_resources"
-        ]
+        self.required_keys = ["subtask_name", "missing_resources"]
+
     def post_process(self):
         parsed_answer = self.parse_json()[-1]
         subtask_name = parsed_answer["subtask_name"]
         missing_resources = parsed_answer["missing_resources"]
         self.node.db["current"]["missing_resources"] = missing_resources
-
-
-
 
 
 class DensifyAfterQuery(aq.JsonAfterQuery):
@@ -184,8 +209,10 @@ class DensifyAfterQuery(aq.JsonAfterQuery):
 
         parsed_answer = self.parse_json()[-1]
 
-        self.node.db["current"]["dense_reward_factor"] = parsed_answer['dense_reward_function']
-        self.node.db["current"]["reward"] = parsed_answer['sparse_reward_only_function']
+        self.node.db["current"]["dense_reward_factor"] = parsed_answer[
+            "dense_reward_function"
+        ]
+        self.node.db["current"]["reward"] = parsed_answer["sparse_reward_only_function"]
 
 
 class UpdatedDoneCondAfterQuery(aq.JsonAfterQuery):

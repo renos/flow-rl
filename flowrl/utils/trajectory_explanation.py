@@ -31,6 +31,7 @@ def extract_first_valid_subsequence(env_states, actions, start_value=12, end_val
     start_idx += 1
 
     # If we didn't find any start values, return None
+    print(start_idx, end_idx)
     if start_idx >= end_idx:
         return None, None
 

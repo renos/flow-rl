@@ -140,7 +140,7 @@ from craftax.craftax_classic.renderer import render_craftax_pixels
 import numpy as np
 
 
-def gen_frames_hierarchical(policy_path, max_num_frames=2000):
+def gen_frames_hierarchical(policy_path, max_num_frames=2000, goal_state=None):
     config_path = f"{policy_path}/config.yaml"
     with open(config_path, "r") as f:
         config_ = yaml.load(f, Loader=yaml.FullLoader)
@@ -237,7 +237,10 @@ def gen_frames_hierarchical(policy_path, max_num_frames=2000):
     inputs = jnp.arange(max_num_frames)
 
     # Execute the scan
-    _, output = jax.lax.scan(step_fn, initial_carry, inputs)
+    max_state = 0
+    while max_state < goal_state:
+        _, output = jax.lax.scan(step_fn, initial_carry, inputs)
+        max_state = jnp.max(output[1])  # Get the maximum player state from the output
 
     frames, states, new_env_states, actions = output
     return frames, states, new_env_states, actions

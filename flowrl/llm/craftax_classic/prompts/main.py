@@ -492,7 +492,7 @@ import jax
         """,
         "dep": [],
         "after": [
-            "next_subtask",
+            "reuse_or_generate",
             "create_skill_densify_reward_reasoning",
         ],
         "compose": ComposeReasoningPrompt(),
@@ -518,7 +518,7 @@ import jax
     ```
         """,
         "dep": [],
-        "after": ["next_subtask"],
+        "after": ["reuse_or_generate"],
         "compose": ComposeReasoningPrompt(),
         "query": LLM_API_FUNCTION_GPT4,
         "after_query": UpdatedDoneCondAfterQuery(),
@@ -604,7 +604,7 @@ No need to retype BlockType, Inventory, and Achievement they will be provided in
 Return all three functions in a single code block, don't seperate it into 3.
         """,
         "dep": [],
-        "after": ["next_subtask", "reuse_skill_task_reasoning"],
+        "after": ["reuse_or_generate", "reuse_skill_task_reasoning"],
         "compose": ComposeReasoningPrompt(),
         "query": LLM_API_FUNCTION_GPT4,
         # TODO: Add after_query

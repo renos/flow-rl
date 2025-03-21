@@ -4,6 +4,7 @@ from flowrl.llm.craftax_classic.after_queries import *
 
 def return_prompts(LLM_API_FUNCTION_GPT4):
     inventory_prompts = {}
+
     inventory_prompts["predict_item_count"] = {
         "prompt": """
         
