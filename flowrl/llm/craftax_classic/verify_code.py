@@ -1,3 +1,6 @@
+import os
+# At the top of your file
+os.environ['JAX_COMPILATION_CACHE_DIR'] = '/tmp/jax_cache'
 import jax.numpy as jnp
 import os
 
@@ -10,6 +13,8 @@ from craftax.craftax_classic.envs.craftax_symbolic_env import (
 )
 import numpy as np
 from jax import jit
+
+
 
 rng = jax.random.PRNGKey(np.random.randint(2**31))
 rng, _rng = jax.random.split(rng)

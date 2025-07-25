@@ -28,18 +28,18 @@ Nearby Blocks
 $db.current.closest_blocks$
 ```
 
+Instruction Manual:
+```
+$db.manual$
+```
+
 Knowledgebase:
 ```
 $db.knowledge_base$
 ```
 
-Existing Skills:
-```
-$db.skills$
-```
-
 # Instruction
-Consider the player's current status, inventory, instruction manual, knowledgebase, and existing skills. Identify the next skill that should be learned. Pay special attention to the task requirements and action prerequisites from the knowledgebase.
+Consider the player's current status, inventory, instruction manual, and knowledgebase gained from past tasks. Identify the next task that should be completed. Pay special attention to the task requirements and action prerequisites from the knowledgebase.
 Fill out the following sections explicitly before arriving at the final formatted output.
 
 ## Completed Achievements
@@ -54,11 +54,8 @@ List up to 3 potential future objectives that the player could work toward next.
 ## Review Nearby Blocks/Objects
 In a few sentences, review and summarize the nearby blocks that may be relevant to the identified objectives.
 
-## Review Existing Skills
-In a few sentences, review existing skills. Do not propose a skill which has already been learned.
-
 ## Immediate Objective
-Identify the next skill the player should learn based on your analysis. You should only propose skills whose requirements can be fulfilled by preexisting skills.
+Identify the immediate objective that the player should work toward next based on your analysis.
 
 # Note
 - Distance/adjaceny cannot be directly tracked, but you can use the closest blocks as a proxy.
@@ -67,10 +64,9 @@ Identify the next skill the player should learn based on your analysis. You shou
 Finally, complete the following Json dictionary as your output.
 ```json
 {
-"skill_name": # name of the objective
+"task_name": # name of the objective
 "description": # (string) 1-line description of the objective
-"requirements": # (string) requirements for the objective.
-"gain": # (str) what the player will gain after applying the skill. 
+"requirements": # (string) requirements for the objective
 }
 ```
         """,
@@ -82,7 +78,7 @@ Finally, complete the following Json dictionary as your output.
 
     prompts["next_subtask"] = {
         "prompt": """
-Consider the player's current status, inventory, and Knowledgebase. 
+Consider the player's current status, inventory, and instruction manual. 
 
 Player Status:
 ```
@@ -95,6 +91,10 @@ $db.current.inventory$
 ```
 Note: The inventory can store a maximum of 9 of each.
 
+Instruction Manual:
+```
+$db.manual$
+```
 
 Knowledgebase:
 ```
@@ -106,12 +106,7 @@ Nearby Blocks
 $db.current.closest_blocks$
 ```
 
-Existing Skills
-```
-$db.current.task$
-```
-
-Skill to Learn
+Current Task
 ```
 $db.current.task$
 ```
@@ -119,32 +114,50 @@ $db.current.task$
 # Instruction
 
 ## Review Inventory
-Summarize and analyze inventory items that may be relevant to the skill to learn. Round reasonably large decimals up, otherwise round down.
+Summarize and analyze current inventory items that may be relevant to the current task. Round reasonably large decimals up, otherwise round down.
 
 ## Review Nearby Blocks
-Summarize and analyze the nearby blocks that may be relevant to the skill to learn.
+Summarize and analyze the nearby blocks that may be relevant to the current task.
 
 ## Analyze Knowledgebase
-Identify and draw connections between the skill to learn and any relevant existing knowledge.
+Identify and draw connections between the current task and any relevant existing knowledge.
 
 ## Task Analysis
 Explicitly analyze the current task:
 - What is the core objective?
-- What are the specific requirements? 
-- What resources are consumed when applying the skill.
+- What are the specific requirements, and are they met?
+- How could the task and unmet requirements be broken down into smaller subtasks? Is the breakdown useful given the current state?
+  - If yes, list and rank them in order of execution. Note that the subtasks should be explicit and complete on their own, and should convey a clear quantifiable goal. When stating any subtasks, always include a completion criteria.
+
+## Next Subtask/Task
+1. Identify the first incomplete task/subtask that should be completed next based on your "Task Analysis". The task/subtask you pick must be easily verifiable just by observing the game state and player intrinsics.
+2. Conduct the following analysis on the how the current task affects the future:
+  a. Explicitly analyze the following factors in seperate bullet points:
+    - Current inventory levels and shortages.
+    - The player's achievements and progress toward goals.
+    - Resource abundance and other environmental factors.
+  b. Do an explict estimation of how this task/subtask may support future tasks or crafting, and state the following:
+    - Give numerical estimates where possible.
+    - State what you know and what assumptions you are making.
+    - Optimize for efficiency and be specific about any numbers or values you use.
+3. Design the completion criteria for the next task/subtask. The completion criteria should be designed the single most relevant *factor* from the following:
+  - The player's current inventory
+  - The changes in current inventory
+  - The distance to closest blocks of each type
+  - The changes in distance to closest blocks of each type
+  - The player's achievements in the last timestep
 
 # Note
 - Distance/adjaceny CANNOT be directly verified or quantified, but you can use the closest blocks as a proxy.
-- Skills should be explicit and complete on their own, and should convey a clear quantifiable goal. The purpose of requirements/consumption is to later parse what other skills need to be performed before applying the skill.
+- Subtasks should be explicit and complete on their own, and should convey a clear quantifiable goal.
   
 # Formatting
 Finally, complete the following Json dictionary as your output.
 ```json
 {
-"skill_name": , # name of the current skill
-"requirements": , # (str) list of requirements needed before the player can apply the skill.
-"consumption": , # (dict): a dictionary of what resources are consumed by applying the skill. Write consumption in terms of n, the number of gain when applying the skill.
-"gain": , # (dict) a dictionary of what is gained by applying the skill. The gain for the skill goal should be n.
+"subtask_name": , # name of the next task/subtask
+"completion_criteria": , # (str) concrete success criteria of the task/subtask.
+"tasksub_requirements": , # (str) any incomplete requirements not captured by the task/subtask or completion criteria
 }
 ```
         """,
@@ -155,9 +168,44 @@ Finally, complete the following Json dictionary as your output.
         "after_query": SubtaskAfterQuery(),
     }
 
+    prompts["reuse_or_generate"] = {
+        "prompt": """
+Consider the Current Subtask and List of existing skills
+
+
+Current Subtask
+```
+$db.current.subtask$
+```
+
+Existing Skills
+```
+$db.skills$
+```
+
+
+## Review Skills
+In plain text, review existing skills and determine whether one exists that can complete the current subtask. A skill should only be reused if it fits the current subtask exactly.
+
+# Formatting
+Finally, complete the following Json dictionary as your output.
+```json
+{
+    "reuse_skill": # (bool) true if we are reusing a skill to complete the task and false if we are making a new skill to complete the task.
+    "reused_skill": # (string) name of the skill we are reusing from the existing skills, write NA if no skill is being reused.
+}
+```
+        """,
+        "dep": ["next_subtask"],
+        "compose": ComposeReasoningPrompt(),
+        "query": LLM_API_FUNCTION_GPT4,
+        "after_query": ReuseOrGenerateNewSkill(),
+    }
+
+    temp_prompts = {}
 
     # temp_prompts["densify_reward_reasoning"]
-    prompts["create_skill_densify_reward_reasoning"] = {
+    temp_prompts["create_skill_densify_reward_reasoning"] = {
         "prompt": """
 # All factors
 
@@ -237,15 +285,15 @@ The reward function is calculated independently at each timestep using these ava
 - The completion criteria is a separate function; do not worry about implementing it
 - No state can be stored between timesteps - each reward calculation must be independent
 
-# Skill
-Given the following skill, design the reward function for the Skill `$db.current.skill_name$`
+# Task
+Given the following information, design the reward function for the Skill `$db.current.subtask_name$`
 ```
-$db.current.skill_with_consumption$
+$db.current.subtask$
 ```
 
 # Steps
 Explicitly complete the following steps before arriving at your final formatted output
-0. Analyze Skill requirements and identify appropriate reward factors:
+0. Analyze subtask requirements and identify appropriate reward factors:
    - What is the core objective of this subtask?
    - What specific behaviors or outcomes need to be rewarded?
    - For each available factor, determine if it can provide meaningful feedback for the required behaviors
@@ -289,13 +337,13 @@ If no dense reward function is possible or needed for this task, simply state NA
 ```
         """,
         "dep": [],
-        "after": ["next_subtask"],
+        "after": ["reuse_or_generate"],
         "compose": ComposeReasoningPrompt(),
         "query": LLM_API_FUNCTION_GPT4,
         "after_query": DensifyAfterQuery(),
     }
 
-    prompts["create_skill_coding"] = {
+    temp_prompts["create_skill_coding"] = {
         "prompt": """
 ```python
 class BlockType(Enum):
@@ -449,11 +497,121 @@ import jax
         """,
         "dep": [],
         "after": [
-            "next_subtask",
+            "reuse_or_generate",
             "create_skill_densify_reward_reasoning",
         ],
         "compose": ComposeReasoningPrompt(),
         "query": LLM_API_FUNCTION_GPT4,
         # TODO: Add after_query
     }
-    return prompts, {}
+    temp_prompts["reuse_skill_task_reasoning"] = {
+        "prompt": """
+    Given the following information,
+    ```
+    $db.current.subtask$
+    $db.current.skill_reused$
+    ```
+
+    ## Review requirements
+    Determine whether the task completion function needs to change for the current subtask.
+
+    Finally, complete the following Json dictionary for your output.
+    ```json
+    {
+    "completion_changes": # (string) List how the completion function of the skill should change.
+    }
+    ```
+        """,
+        "dep": [],
+        "after": ["reuse_or_generate"],
+        "compose": ComposeReasoningPrompt(),
+        "query": LLM_API_FUNCTION_GPT4,
+        "after_query": UpdatedDoneCondAfterQuery(),
+    }
+
+    temp_prompts["reuse_skill_coding"] = {
+        "prompt": """
+```python
+class BlockType(Enum):
+    INVALID = 0
+    OUT_OF_BOUNDS = 1
+    GRASS = 2
+    WATER = 3
+    STONE = 4
+    TREE = 5
+    WOOD = 6
+    PATH = 7
+    COAL = 8
+    IRON = 9
+    DIAMOND = 10
+    CRAFTING_TABLE = 11
+    FURNACE = 12
+    SAND = 13
+    LAVA = 14
+    PLANT = 15
+    RIPE_PLANT = 16
+# Max inventory value is 9, max player intrinsics values are also 9 
+@struct.dataclass
+class Inventory:
+    wood: int = 0
+    stone: int = 0
+    coal: int = 0
+    iron: int = 0
+    diamond: int = 0
+    sapling: int = 0
+    wood_pickaxe: int = 0
+    stone_pickaxe: int = 0
+    iron_pickaxe: int = 0
+    wood_sword: int = 0
+    stone_sword: int = 0
+    iron_sword: int = 0
+
+class Achievement(Enum):
+    COLLECT_WOOD = 0
+    PLACE_TABLE = 1
+    EAT_COW = 2
+    COLLECT_SAPLING = 3
+    COLLECT_DRINK = 4
+    MAKE_WOOD_PICKAXE = 5
+    MAKE_WOOD_SWORD = 6
+    PLACE_PLANT = 7
+    DEFEAT_ZOMBIE = 8
+    COLLECT_STONE = 9
+    PLACE_STONE = 10
+    EAT_PLANT = 11
+    DEFEAT_SKELETON = 12
+    MAKE_STONE_PICKAXE = 13
+    MAKE_STONE_SWORD = 14
+    WAKE_UP = 15
+    PLACE_FURNACE = 16
+    COLLECT_COAL = 17
+    COLLECT_IRON = 18
+    COLLECT_DIAMOND = 19
+    MAKE_IRON_PICKAXE = 20
+    MAKE_IRON_SWORD = 21
+
+Skill to be reused:
+```json
+$db.current.skill_reused$
+```
+
+Given the above documentations and existing skills, reuse the `task_is_done`, `task_reward`, and task_network_number function for the subtask `$db.current.subtask_name$` with the following details:
+```json
+$db.current.subtask$
+$db.current.reward$
+```
+
+The task network number should be the same as the old one since we're reusing an old skill and so the networks will be the same.
+The reward function should not change since we're reusing the skill, just copy over the one given.
+Do not change the function signature or the docstrings. Do not make any assumptions beyond the information given to you. 
+The code you write should be able to be jax compiled, no if statements.
+No need to retype BlockType, Inventory, and Achievement they will be provided in the environment.
+Return all three functions in a single code block, don't seperate it into 3.
+        """,
+        "dep": [],
+        "after": ["reuse_or_generate", "reuse_skill_task_reasoning"],
+        "compose": ComposeReasoningPrompt(),
+        "query": LLM_API_FUNCTION_GPT4,
+        # TODO: Add after_query
+    }
+    return prompts, temp_prompts

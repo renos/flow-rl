@@ -10,9 +10,10 @@ class TaskAfterQuery(aq.JsonAfterQuery):
         super().__init__()
         self.type = dict
         self.required_keys = [
-            "task_name",
+            "skill_name",
             "description",
             "requirements",
+            "gain",
             "completion_criteria",
         ]
         # self.length = len(self.keys)
@@ -21,7 +22,7 @@ class TaskAfterQuery(aq.JsonAfterQuery):
 
         parsed_answer = self.parse_json()[-1]
 
-        self.node.db["current"]["task_name"] = parsed_answer["task_name"]
+        self.node.db["current"]["skill_name"] = parsed_answer["skill_name"]
         self.node.db["current"]["task"] = parsed_answer
 
 
@@ -31,7 +32,10 @@ class SubtaskAfterQuery(aq.JsonAfterQuery):
         super().__init__()
         self.type = dict
         self.required_keys = [
-            "subtask_name",
+            "skill_name",
+            "requirements",
+            "consumption",
+            "gain",
             "completion_criteria",
         ]
         # self.length = len(self.keys)
@@ -40,8 +44,7 @@ class SubtaskAfterQuery(aq.JsonAfterQuery):
 
         parsed_answer = self.parse_json()[-1]
 
-        self.node.db["current"]["subtask_name"] = parsed_answer["subtask_name"]
-        self.node.db["current"]["subtask"] = parsed_answer
+        self.node.db["current"]["skill_with_consumption"] = parsed_answer
 
 
 class ReuseSkill(aq.JsonAfterQuery):
