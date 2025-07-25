@@ -1,0 +1,136 @@
+{
+  "action": {
+    "NOOP": {
+      "noop": []
+    },
+    "LEFT": {
+      "move_left": []
+    },
+    "RIGHT": {
+      "move_right": []
+    },
+    "UP": {
+      "move_up": []
+    },
+    "DOWN": {
+      "move_down": []
+    },
+    "DO": {
+      "break_tree": [
+        "Adjacent block is TREE",
+        "Inventory.wood < 9"
+      ],
+      "break_wood": [
+        "Adjacent block is WOOD",
+        "Inventory.wood < 9"
+      ],
+      "break_stone": [
+        "Adjacent block is STONE",
+        "Inventory.stone < 9",
+        "Inventory.wood_pickaxe > 0 or Inventory.stone_pickaxe > 0 or Inventory.iron_pickaxe > 0"
+      ],
+      "break_coal": [
+        "Adjacent block is COAL",
+        "Inventory.coal < 9",
+        "Inventory.wood_pickaxe > 0 or Inventory.stone_pickaxe > 0 or Inventory.iron_pickaxe > 0"
+      ],
+      "break_iron": [
+        "Adjacent block is IRON",
+        "Inventory.iron < 9",
+        "Inventory.stone_pickaxe > 0 or Inventory.iron_pickaxe > 0"
+      ],
+      "break_diamond": [
+        "Adjacent block is DIAMOND",
+        "Inventory.diamond < 9",
+        "Inventory.iron_pickaxe > 0"
+      ],
+      "break_plant": [
+        "Adjacent block is PLANT",
+        "Inventory.sapling < 9"
+      ],
+      "harvest_ripe_plant": [
+        "Adjacent block is RIPE_PLANT",
+        "Inventory.sapling < 9"
+      ],
+      "use_crafting_table": [
+        "Adjacent block is CRAFTING_TABLE"
+      ],
+      "use_furnace": [
+        "Adjacent block is FURNACE"
+      ]
+    },
+    "SLEEP": {
+      "sleep": []
+    },
+    "PLACE_STONE": {
+      "place_stone": [
+        "Inventory.stone > 0",
+        "Target block is GRASS, PATH, or SAND"
+      ]
+    },
+    "PLACE_TABLE": {
+      "place_crafting_table": [
+        "Inventory.wood >= 4",
+        "Target block is GRASS, PATH, or SAND"
+      ]
+    },
+    "PLACE_FURNACE": {
+      "place_furnace": [
+        "Inventory.stone >= 8",
+        "Target block is GRASS, PATH, or SAND"
+      ]
+    },
+    "PLACE_PLANT": {
+      "place_plant": [
+        "Inventory.sapling > 0",
+        "Target block is GRASS, PATH, or SAND"
+      ]
+    },
+    "MAKE_WOOD_PICKAXE": {
+      "make_wood_pickaxe": [
+        "Inventory.wood >= 3",
+        "Inventory.wood_pickaxe < 9",
+        "Adjacent block is CRAFTING_TABLE"
+      ]
+    },
+    "MAKE_STONE_PICKAXE": {
+      "make_stone_pickaxe": [
+        "Inventory.wood >= 2",
+        "Inventory.stone >= 3",
+        "Inventory.stone_pickaxe < 9",
+        "Adjacent block is CRAFTING_TABLE"
+      ]
+    },
+    "MAKE_IRON_PICKAXE": {
+      "make_iron_pickaxe": [
+        "Inventory.wood >= 2",
+        "Inventory.iron >= 3",
+        "Inventory.iron_pickaxe < 9",
+        "Adjacent block is CRAFTING_TABLE"
+      ]
+    },
+    "MAKE_WOOD_SWORD": {
+      "make_wood_sword": [
+        "Inventory.wood >= 2",
+        "Inventory.wood_sword < 9",
+        "Adjacent block is CRAFTING_TABLE"
+      ]
+    },
+    "MAKE_STONE_SWORD": {
+      "make_stone_sword": [
+        "Inventory.wood >= 1",
+        "Inventory.stone >= 2",
+        "Inventory.stone_sword < 9",
+        "Adjacent block is CRAFTING_TABLE"
+      ]
+    },
+    "MAKE_IRON_SWORD": {
+      "make_iron_sword": [
+        "Inventory.wood >= 1",
+        "Inventory.iron >= 2",
+        "Inventory.iron_sword < 9",
+        "Adjacent block is CRAFTING_TABLE"
+      ]
+    }
+  }
+}

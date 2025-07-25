@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run flowrl.bottomup",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "flowrl.bottomup",
+      "console": "integratedTerminal",
+      "args": [
+        "--env_name", "Craftax-Classic-Symbolic-v1"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    }
+  ]
+}

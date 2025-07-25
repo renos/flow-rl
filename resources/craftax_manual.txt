@@ -1,0 +1,471 @@
+# Craftax Game Manual
+
+Welcome to Craftax, a lightning-fast benchmark for open-ended reinforcement learning. This manual will guide you through the game's rules, mechanics, systems, and achievements, providing all the information you need to play the game effectively.
+
+## Game Overview
+
+Craftax is a procedurally generated, open-world survival game where players must explore, gather resources, craft tools, and defeat enemies to progress through multiple floors. The game is designed to test exploration, long-term planning, and generalization skills.
+
+## Game Mechanics
+
+### World Structure
+
+- **Floors**: The game consists of multiple procedurally generated floors, each with unique challenges, enemies, and resources. Players start on the overworld (floor 0) and can descend to lower floors by finding and using ladders.
+- **Blocks**: The world is made up of various block types, each with specific properties and interactions. Players can mine, place, and interact with blocks to gather resources and craft items.
+
+### Player Attributes
+
+- **Health**: Represents the player's vitality. If health reaches zero, the game ends.
+- **Food, Drink, and Energy**: These attributes deplete over time and must be replenished by eating, drinking, and sleeping/resting.
+- **Mana**: Used to cast spells. Replenished over time or by drinking specific potions.
+- **Experience Points (XP)**: Earned by descending floors. Can be used to level up attributes: Dexterity, Strength, and Intelligence.
+
+### Inventory
+
+- Players can carry various items, including resources, tools, weapons, armor, potions, and more. Inventory management is crucial for survival and progression.
+
+### Combat
+
+- Players can engage in combat with various creatures using melee attacks, ranged weapons, and spells. Each creature has unique behaviors and weaknesses.
+
+### Crafting
+
+- Players can craft tools, weapons, armor, and other items using resources gathered from the environment. Crafting requires specific resources and crafting stations (e.g., crafting tables, furnaces).
+
+### Achievements
+
+- The game features a set of achievements that reward players for completing specific tasks. Achievements provide additional rewards and are essential for progression.
+
+## Game Systems
+
+### Movement
+
+- Players can move in four directions (up, down, left, right) and interact with adjacent blocks and creatures.
+
+### Interactions
+
+- Players can mine blocks, place items, craft tools, and interact with the environment using specific actions.
+
+### Combat
+
+- Players can attack creatures using melee weapons, ranged weapons, or spells. Each attack type has specific requirements and effects.
+
+### Crafting
+
+- Crafting requires specific resources and crafting stations. Players must gather resources and use crafting tables or furnaces to create items.
+
+### Potions and Enchantments
+
+- Potions provide various effects, such as healing or mana restoration. Enchantments enhance weapons and armor with elemental properties.
+
+## Individual Achievement Decomposition
+
+### Basic Achievements
+
+1. **Collect Wood**
+   - **Prerequisites**: None
+   - **Steps**: Mine a tree block to collect wood.
+   - **Techniques**: Approach a tree and use the mining action.
+   - **Requirements**: None
+
+2. **Place Crafting Table**
+   - **Prerequisites**: Collect Wood
+   - **Steps**: Craft a crafting table using wood and place it on the ground.
+   - **Techniques**: Use the crafting action near a crafting table.
+   - **Requirements**: 2 wood
+
+3. **Eat Cow**
+   - **Prerequisites**: None
+   - **Steps**: Defeat a cow and collect its meat, then consume the meat.
+   - **Techniques**: Use melee attacks to defeat the cow.
+   - **Requirements**: None
+
+4. **Collect Sapling**
+   - **Prerequisites**: None
+   - **Steps**: Mine a grass block to collect a sapling.
+   - **Techniques**: Approach a grass block and use the mining action.
+   - **Requirements**: None
+
+5. **Collect Drink**
+   - **Prerequisites**: None
+   - **Steps**: Find a water block or fountain and drink from it.
+   - **Techniques**: Stand next to the water source and use the drink action.
+   - **Requirements**: None
+
+6. **Make Wood Pickaxe**
+   - **Prerequisites**: Collect Wood
+   - **Steps**: Craft a wood pickaxe using wood at a crafting table.
+   - **Techniques**: Use the crafting action near a crafting table.
+   - **Requirements**: 1 wood
+
+7. **Make Wood Sword**
+   - **Prerequisites**: Collect Wood
+   - **Steps**: Craft a wood sword using wood at a crafting table.
+   - **Techniques**: Use the crafting action near a crafting table.
+   - **Requirements**: 1 wood
+
+8. **Place Plant**
+   - **Prerequisites**: Collect Sapling
+   - **Steps**: Place a sapling on a grass block.
+   - **Techniques**: Use the place action while facing a grass block.
+   - **Requirements**: 1 sapling
+
+9. **Defeat Zombie**
+   - **Prerequisites**: None
+   - **Steps**: Use a weapon to defeat a zombie.
+   - **Techniques**: Use melee or ranged attacks.
+   - **Requirements**: None
+
+10. **Collect Stone**
+    - **Prerequisites**: Make Wood Pickaxe
+    - **Steps**: Mine a stone block using a pickaxe.
+    - **Techniques**: Use the mining action with a pickaxe equipped.
+    - **Requirements**: 1 wood pickaxe
+
+11. **Place Stone**
+    - **Prerequisites**: Collect Stone
+    - **Steps**: Place a stone block on the ground.
+    - **Techniques**: Use the place action while facing an empty block.
+    - **Requirements**: 1 stone
+
+12. **Eat Plant**
+    - **Prerequisites**: Place Plant
+    - **Steps**: Wait for a planted sapling to grow into a ripe plant, then consume it.
+    - **Techniques**: Use the eat action when facing a ripe plant.
+    - **Requirements**: None
+
+13. **Defeat Skeleton**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat a skeleton.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+14. **Make Stone Pickaxe**
+    - **Prerequisites**: Make Wood Pickaxe, Collect Stone
+    - **Steps**: Craft a stone pickaxe using wood and stone at a crafting table.
+    - **Techniques**: Use the crafting action near a crafting table.
+    - **Requirements**: 1 wood, 1 stone
+
+15. **Make Stone Sword**
+    - **Prerequisites**: Make Wood Sword, Collect Stone
+    - **Steps**: Craft a stone sword using wood and stone at a crafting table.
+    - **Techniques**: Use the crafting action near a crafting table.
+    - **Requirements**: 1 wood, 1 stone
+
+16. **Wake Up**
+    - **Prerequisites**: None
+    - **Steps**: Sleep until energy is fully restored.
+    - **Techniques**: Use the sleep action when energy is low.
+    - **Requirements**: None
+
+17. **Place Furnace**
+    - **Prerequisites**: Collect Stone
+    - **Steps**: Craft a furnace using stone and place it on the ground.
+    - **Techniques**: Use the crafting action near a crafting table.
+    - **Requirements**: 1 stone
+
+18. **Collect Coal**
+    - **Prerequisites**: Make Stone Pickaxe
+    - **Steps**: Mine a coal block using a pickaxe.
+    - **Techniques**: Use the mining action with a pickaxe equipped.
+    - **Requirements**: 1 stone pickaxe
+
+19. **Collect Iron**
+    - **Prerequisites**: Make Stone Pickaxe
+    - **Steps**: Mine an iron block using a pickaxe.
+    - **Techniques**: Use the mining action with a pickaxe equipped.
+    - **Requirements**: 1 stone pickaxe
+
+20. **Collect Diamond**
+    - **Prerequisites**: Make Iron Pickaxe
+    - **Steps**: Mine a diamond block using a pickaxe.
+    - **Techniques**: Use the mining action with a pickaxe equipped.
+    - **Requirements**: 1 iron pickaxe
+
+21. **Make Iron Pickaxe**
+    - **Prerequisites**: Make Stone Pickaxe, Collect Iron, Collect Coal
+    - **Steps**: Craft an iron pickaxe using wood, stone, iron, and coal at a furnace and crafting table.
+    - **Techniques**: Use the crafting action near a furnace and crafting table.
+    - **Requirements**: 1 wood, 1 stone, 1 iron, 1 coal
+
+22. **Make Iron Sword**
+    - **Prerequisites**: Make Stone Sword, Collect Iron, Collect Coal
+    - **Steps**: Craft an iron sword using wood, stone, iron, and coal at a furnace and crafting table.
+    - **Techniques**: Use the crafting action near a furnace and crafting table.
+    - **Requirements**: 1 wood, 1 stone, 1 iron, 1 coal
+
+23. **Make Arrow**
+    - **Prerequisites**: Collect Stone, Collect Wood
+    - **Steps**: Craft arrows using wood and stone at a crafting table.
+    - **Techniques**: Use the crafting action near a crafting table.
+    - **Requirements**: 1 wood, 1 stone
+
+24. **Make Torch**
+    - **Prerequisites**: Collect Coal, Collect Wood
+    - **Steps**: Craft torches using wood and coal at a crafting table.
+    - **Techniques**: Use the crafting action near a crafting table.
+    - **Requirements**: 1 wood, 1 coal
+
+25. **Place Torch**
+    - **Prerequisites**: Make Torch
+    - **Steps**: Place a torch on a valid block.
+    - **Techniques**: Use the place action while facing a valid block.
+    - **Requirements**: 1 torch
+
+### Intermediate Achievements
+
+26. **Make Diamond Sword**
+    - **Prerequisites**: Make Iron Sword, Collect Diamond
+    - **Steps**: Craft a diamond sword using wood and diamond at a crafting table.
+    - **Techniques**: Use the crafting action near a crafting table.
+    - **Requirements**: 1 wood, 2 diamond
+
+27. **Make Iron Armour**
+    - **Prerequisites**: Collect Iron, Collect Coal
+    - **Steps**: Craft iron armor using iron and coal at a furnace and crafting table.
+    - **Techniques**: Use the crafting action near a furnace and crafting table.
+    - **Requirements**: 3 iron, 3 coal
+
+28. **Make Diamond Armour**
+    - **Prerequisites**: Collect Diamond
+    - **Steps**: Craft diamond armor using diamond at a crafting table.
+    - **Techniques**: Use the crafting action near a crafting table.
+    - **Requirements**: 3 diamond
+
+29. **Enter Gnomish Mines**
+    - **Prerequisites**: None
+    - **Steps**: Descend to the Gnomish Mines floor using a ladder.
+    - **Techniques**: Find and use a ladder down.
+    - **Requirements**: None
+
+30. **Enter Dungeon**
+    - **Prerequisites**: None
+    - **Steps**: Descend to the Dungeon floor using a ladder.
+    - **Techniques**: Find and use a ladder down.
+    - **Requirements**: None
+
+31. **Enter Sewers**
+    - **Prerequisites**: None
+    - **Steps**: Descend to the Sewers floor using a ladder.
+    - **Techniques**: Find and use a ladder down.
+    - **Requirements**: None
+
+32. **Enter Vault**
+    - **Prerequisites**: None
+    - **Steps**: Descend to the Vault floor using a ladder.
+    - **Techniques**: Find and use a ladder down.
+    - **Requirements**: None
+
+33. **Enter Troll Mines**
+    - **Prerequisites**: None
+    - **Steps**: Descend to the Troll Mines floor using a ladder.
+    - **Techniques**: Find and use a ladder down.
+    - **Requirements**: None
+
+34. **Enter Fire Realm**
+    - **Prerequisites**: None
+    - **Steps**: Descend to the Fire Realm floor using a ladder.
+    - **Techniques**: Find and use a ladder down.
+    - **Requirements**: None
+
+35. **Enter Ice Realm**
+    - **Prerequisites**: None
+    - **Steps**: Descend to the Ice Realm floor using a ladder.
+    - **Techniques**: Find and use a ladder down.
+    - **Requirements**: None
+
+36. **Enter Graveyard**
+    - **Prerequisites**: None
+    - **Steps**: Descend to the Graveyard floor using a ladder.
+    - **Techniques**: Find and use a ladder down.
+    - **Requirements**: None
+
+37. **Defeat Gnome Warrior**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat a Gnome Warrior.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+38. **Defeat Gnome Archer**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat a Gnome Archer.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+39. **Defeat Orc Soldier**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat an Orc Soldier.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+40. **Defeat Orc Mage**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat an Orc Mage.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+41. **Defeat Lizard**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat a Lizard.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+42. **Defeat Kobold**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat a Kobold.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+43. **Defeat Troll**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat a Troll.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+44. **Defeat Deep Thing**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat a Deep Thing.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+45. **Defeat Pigman**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat a Pigman.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+46. **Defeat Fire Elemental**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat a Fire Elemental.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+47. **Defeat Frost Troll**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat a Frost Troll.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+48. **Defeat Ice Elemental**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat an Ice Elemental.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+49. **Damage Necromancer**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to damage the Necromancer.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+50. **Defeat Necromancer**
+    - **Prerequisites**: Damage Necromancer
+    - **Steps**: Use a weapon to defeat the Necromancer.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+51. **Eat Bat**
+    - **Prerequisites**: None
+    - **Steps**: Defeat a Bat and collect its meat, then consume the meat.
+    - **Techniques**: Use melee attacks to defeat the Bat.
+    - **Requirements**: None
+
+52. **Eat Snail**
+    - **Prerequisites**: None
+    - **Steps**: Defeat a Snail and collect its meat, then consume the meat.
+    - **Techniques**: Use melee attacks to defeat the Snail.
+    - **Requirements**: None
+
+53. **Find Bow**
+    - **Prerequisites**: None
+    - **Steps**: Find a bow in a chest.
+    - **Techniques**: Open chests to find a bow.
+    - **Requirements**: None
+
+54. **Fire Bow**
+    - **Prerequisites**: Find Bow, Make Arrow
+    - **Steps**: Use the bow to fire an arrow.
+    - **Techniques**: Use the shoot action with a bow equipped.
+    - **Requirements**: 1 bow, 1 arrow
+
+55. **Collect Sapphire**
+    - **Prerequisites**: Make Iron Pickaxe
+    - **Steps**: Mine a sapphire block using a pickaxe.
+    - **Techniques**: Use the mining action with a pickaxe equipped.
+    - **Requirements**: 1 iron pickaxe
+
+56. **Learn Fireball**
+    - **Prerequisites**: None
+    - **Steps**: Read a book to learn the Fireball spell.
+    - **Techniques**: Use the read action with a book in inventory.
+    - **Requirements**: 1 book
+
+57. **Cast Fireball**
+    - **Prerequisites**: Learn Fireball
+    - **Steps**: Use the Fireball spell to attack an enemy.
+    - **Techniques**: Use the cast action with sufficient mana.
+    - **Requirements**: 2 mana
+
+58. **Learn Iceball**
+    - **Prerequisites**: None
+    - **Steps**: Read a book to learn the Iceball spell.
+    - **Techniques**: Use the read action with a book in inventory.
+    - **Requirements**: 1 book
+
+59. **Cast Iceball**
+    - **Prerequisites**: Learn Iceball
+    - **Steps**: Use the Iceball spell to attack an enemy.
+    - **Techniques**: Use the cast action with sufficient mana.
+    - **Requirements**: 2 mana
+
+60. **Collect Ruby**
+    - **Prerequisites**: Make Iron Pickaxe
+    - **Steps**: Mine a ruby block using a pickaxe.
+    - **Techniques**: Use the mining action with a pickaxe equipped.
+    - **Requirements**: 1 iron pickaxe
+
+61. **Make Diamond Pickaxe**
+    - **Prerequisites**: Make Iron Pickaxe, Collect Diamond
+    - **Steps**: Craft a diamond pickaxe using wood and diamond at a crafting table.
+    - **Techniques**: Use the crafting action near a crafting table.
+    - **Requirements**: 1 wood, 3 diamond
+
+62. **Open Chest**
+    - **Prerequisites**: None
+    - **Steps**: Find and open a chest.
+    - **Techniques**: Use the open action when facing a chest.
+    - **Requirements**: None
+
+63. **Drink Potion**
+    - **Prerequisites**: None
+    - **Steps**: Find and drink a potion.
+    - **Techniques**: Use the drink action with a potion in inventory.
+    - **Requirements**: 1 potion
+
+64. **Enchant Sword**
+    - **Prerequisites**: Make Iron Sword, Collect Ruby or Sapphire
+    - **Steps**: Enchant a sword using an enchantment table.
+    - **Techniques**: Use the enchant action near an enchantment table.
+    - **Requirements**: 1 sword, 1 ruby or sapphire, 9 mana
+
+65. **Enchant Armour**
+    - **Prerequisites**: Make Iron Armour, Collect Ruby or Sapphire
+    - **Steps**: Enchant armor using an enchantment table.
+    - **Techniques**: Use the enchant action near an enchantment table.
+    - **Requirements**: 1 armor, 1 ruby or sapphire, 9 mana
+
+66. **Defeat Knight**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat a Knight.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+67. **Defeat Archer**
+    - **Prerequisites**: None
+    - **Steps**: Use a weapon to defeat an Archer.
+    - **Techniques**: Use melee or ranged attacks.
+    - **Requirements**: None
+
+## Conclusion
+
+This manual provides a comprehensive guide to playing Craftax, covering all game mechanics, systems, and achievements. By following the steps and techniques outlined here, players can effectively navigate the game's challenges and progress through its various floors. Good luck, and enjoy your adventure in Craftax!

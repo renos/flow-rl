@@ -1,0 +1,173 @@
+VERIFIED CRAFTAX KNOWLEDGE BASE
+==================================================
+
+Action: NOOP
+------------------------------
+  Subaction: noop
+
+
+Action: LEFT
+------------------------------
+  Subaction: move_left
+
+
+Action: RIGHT
+------------------------------
+  Subaction: move_right
+    - []
+
+There are no requirements to verify, so the response is an empty list:
+
+[]
+
+
+Action: UP
+------------------------------
+  Subaction: move_up
+    - []
+
+There are no requirements to verify, so the response is an empty JSON list:
+
+[]
+
+
+Action: DOWN
+------------------------------
+  Subaction: move_down
+    - []
+
+There are no requirements to verify, so the response is an empty JSON list:
+
+[]
+
+
+Action: DO
+------------------------------
+  Subaction: break_tree
+    - VERIFIED: Adjacent block is TREE
+    - ASSUMPTION: Inventory.wood < 9
+
+  Subaction: break_wood
+    - VERIFIED: Adjacent block is WOOD
+    - ASSUMPTION: Inventory.wood < 9
+
+  Subaction: break_stone
+    - ASSUMPTION: Adjacent block is STONE
+    - ASSUMPTION: Inventory.stone < 9
+    - ASSUMPTION: Inventory.wood_pickaxe > 0 or Inventory.stone_pickaxe > 0 or Inventory.iron_pickaxe > 0
+
+  Subaction: break_coal
+    - VERIFIED: Adjacent block is COAL
+    - ASSUMPTION: Inventory.coal < 9
+    - ASSUMPTION: Inventory.wood_pickaxe > 0 or Inventory.stone_pickaxe > 0 or Inventory.iron_pickaxe > 0
+
+  Subaction: break_iron
+    - VERIFIED: Adjacent block is IRON
+    - ASSUMPTION: Inventory.iron < 9
+    - ASSUMPTION: Inventory.stone_pickaxe > 0 or Inventory.iron_pickaxe > 0
+
+  Subaction: break_diamond
+    - VERIFIED: Adjacent block is DIAMOND
+    - ASSUMPTION: Inventory.diamond < 9
+    - ASSUMPTION: Inventory.iron_pickaxe > 0
+
+  Subaction: break_plant
+    - VERIFIED: Adjacent block is PLANT
+    - ASSUMPTION: Inventory.sapling < 9
+
+  Subaction: harvest_ripe_plant
+    - VERIFIED: Adjacent block is RIPE_PLANT
+    - ASSUMPTION: Inventory.sapling < 9
+
+  Subaction: use_crafting_table
+    - ASSUMPTION: Adjacent block is CRAFTING_TABLE
+
+  Subaction: use_furnace
+    - VERIFIED: Adjacent block is FURNACE
+
+
+Action: SLEEP
+------------------------------
+  Subaction: sleep
+
+
+Action: PLACE_STONE
+------------------------------
+  Subaction: place_stone
+    - ASSUMPTION: Inventory.stone > 0
+    - ASSUMPTION: Target block is GRASS, PATH, or SAND
+
+
+Action: PLACE_TABLE
+------------------------------
+  Subaction: place_crafting_table
+    - ASSUMPTION: Inventory.wood >= 4
+    - ASSUMPTION: Target block is GRASS, PATH, or SAND
+
+
+Action: PLACE_FURNACE
+------------------------------
+  Subaction: place_furnace
+    - ASSUMPTION: Inventory.stone >= 8
+    - ASSUMPTION: Target block is GRASS, PATH, or SAND
+
+
+Action: PLACE_PLANT
+------------------------------
+  Subaction: place_plant
+    - ASSUMPTION: Inventory.sapling > 0
+    - ASSUMPTION: Target block is GRASS, PATH, or SAND
+
+
+Action: MAKE_WOOD_PICKAXE
+------------------------------
+  Subaction: make_wood_pickaxe
+    - ASSUMPTION: Inventory.wood >= 3
+    - ASSUMPTION: Inventory.wood_pickaxe < 9
+    - ASSUMPTION: Adjacent block is CRAFTING_TABLE
+
+
+Action: MAKE_STONE_PICKAXE
+------------------------------
+  Subaction: make_stone_pickaxe
+    - ASSUMPTION: Inventory.wood >= 2
+    - ASSUMPTION: Inventory.stone >= 3
+    - ASSUMPTION: Inventory.stone_pickaxe < 9
+    - ASSUMPTION: Adjacent block is CRAFTING_TABLE
+
+
+Action: MAKE_IRON_PICKAXE
+------------------------------
+  Subaction: make_iron_pickaxe
+    - ASSUMPTION: Inventory.wood >= 2
+    - ASSUMPTION: Inventory.iron >= 3
+    - ASSUMPTION: Inventory.iron_pickaxe < 9
+    - VERIFIED: Adjacent block is CRAFTING_TABLE
+
+
+Action: MAKE_WOOD_SWORD
+------------------------------
+  Subaction: make_wood_sword
+    - ASSUMPTION: Inventory.wood >= 2
+    - ASSUMPTION: Inventory.wood_sword < 9
+    - ASSUMPTION: Adjacent block is CRAFTING_TABLE
+
+
+Action: MAKE_STONE_SWORD
+------------------------------
+  Subaction: make_stone_sword
+    - ASSUMPTION: Inventory.wood >= 1
+    - ASSUMPTION: Inventory.stone >= 2
+    - ASSUMPTION: Inventory.stone_sword < 9
+    - ASSUMPTION: Adjacent block is CRAFTING_TABLE
+
+
+Action: MAKE_IRON_SWORD
+------------------------------
+  Subaction: make_iron_sword
+    - ASSUMPTION: Inventory.wood >= 1
+    - ASSUMPTION: Inventory.iron >= 2
+    - ASSUMPTION: Inventory.iron_sword < 9
+    - VERIFIED: Adjacent block is CRAFTING_TABLE
+
+

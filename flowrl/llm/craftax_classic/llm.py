@@ -22,7 +22,7 @@ try:
     llm_name = "yintat-gpt-4o"
 except:
     get_query = agentkit.llm_api.get_query
-    llm_name = "gpt-4o"
+    llm_name = "gpt-4.1"
     # llm_name = "google-gemini-2.0-pro-exp-02-05"
     # llm_name = "google-gemini-2.0-flash-thinking-exp"
 

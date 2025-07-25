@@ -1,7 +1,7 @@
 from flowrl.utils.test import load_policy_params
 import jax
 
-jax.config.update("jax_compilation_cache_dir", "/data/renos/jax_cache/")
+jax.config.update("jax_compilation_cache_dir", "/home/renos/jax_cache/")
 jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 jax.config.update(

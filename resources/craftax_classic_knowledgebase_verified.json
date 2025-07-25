@@ -1,0 +1,136 @@
+{
+  "action": {
+    "NOOP": {
+      "noop": []
+    },
+    "LEFT": {
+      "move_left": []
+    },
+    "RIGHT": {
+      "move_right": "[]\n\nThere are no requirements to verify, so the response is an empty list:\n\n[]"
+    },
+    "UP": {
+      "move_up": "[]\n\nThere are no requirements to verify, so the response is an empty JSON list:\n\n[]"
+    },
+    "DOWN": {
+      "move_down": "[]\n\nThere are no requirements to verify, so the response is an empty JSON list:\n\n[]"
+    },
+    "DO": {
+      "break_tree": [
+        "VERIFIED: Adjacent block is TREE",
+        "ASSUMPTION: Inventory.wood < 9"
+      ],
+      "break_wood": [
+        "VERIFIED: Adjacent block is WOOD",
+        "ASSUMPTION: Inventory.wood < 9"
+      ],
+      "break_stone": [
+        "ASSUMPTION: Adjacent block is STONE",
+        "ASSUMPTION: Inventory.stone < 9",
+        "ASSUMPTION: Inventory.wood_pickaxe > 0 or Inventory.stone_pickaxe > 0 or Inventory.iron_pickaxe > 0"
+      ],
+      "break_coal": [
+        "VERIFIED: Adjacent block is COAL",
+        "ASSUMPTION: Inventory.coal < 9",
+        "ASSUMPTION: Inventory.wood_pickaxe > 0 or Inventory.stone_pickaxe > 0 or Inventory.iron_pickaxe > 0"
+      ],
+      "break_iron": [
+        "VERIFIED: Adjacent block is IRON",
+        "ASSUMPTION: Inventory.iron < 9",
+        "ASSUMPTION: Inventory.stone_pickaxe > 0 or Inventory.iron_pickaxe > 0"
+      ],
+      "break_diamond": [
+        "VERIFIED: Adjacent block is DIAMOND",
+        "ASSUMPTION: Inventory.diamond < 9",
+        "ASSUMPTION: Inventory.iron_pickaxe > 0"
+      ],
+      "break_plant": [
+        "VERIFIED: Adjacent block is PLANT",
+        "ASSUMPTION: Inventory.sapling < 9"
+      ],
+      "harvest_ripe_plant": [
+        "VERIFIED: Adjacent block is RIPE_PLANT",
+        "ASSUMPTION: Inventory.sapling < 9"
+      ],
+      "use_crafting_table": [
+        "ASSUMPTION: Adjacent block is CRAFTING_TABLE"
+      ],
+      "use_furnace": [
+        "VERIFIED: Adjacent block is FURNACE"
+      ]
+    },
+    "SLEEP": {
+      "sleep": []
+    },
+    "PLACE_STONE": {
+      "place_stone": [
+        "ASSUMPTION: Inventory.stone > 0",
+        "ASSUMPTION: Target block is GRASS, PATH, or SAND"
+      ]
+    },
+    "PLACE_TABLE": {
+      "place_crafting_table": [
+        "ASSUMPTION: Inventory.wood >= 4",
+        "ASSUMPTION: Target block is GRASS, PATH, or SAND"
+      ]
+    },
+    "PLACE_FURNACE": {
+      "place_furnace": [
+        "ASSUMPTION: Inventory.stone >= 8",
+        "ASSUMPTION: Target block is GRASS, PATH, or SAND"
+      ]
+    },
+    "PLACE_PLANT": {
+      "place_plant": [
+        "ASSUMPTION: Inventory.sapling > 0",
+        "ASSUMPTION: Target block is GRASS, PATH, or SAND"
+      ]
+    },
+    "MAKE_WOOD_PICKAXE": {
+      "make_wood_pickaxe": [
+        "ASSUMPTION: Inventory.wood >= 3",
+        "ASSUMPTION: Inventory.wood_pickaxe < 9",
+        "ASSUMPTION: Adjacent block is CRAFTING_TABLE"
+      ]
+    },
+    "MAKE_STONE_PICKAXE": {
+      "make_stone_pickaxe": [
+        "ASSUMPTION: Inventory.wood >= 2",
+        "ASSUMPTION: Inventory.stone >= 3",
+        "ASSUMPTION: Inventory.stone_pickaxe < 9",
+        "ASSUMPTION: Adjacent block is CRAFTING_TABLE"
+      ]
+    },
+    "MAKE_IRON_PICKAXE": {
+      "make_iron_pickaxe": [
+        "ASSUMPTION: Inventory.wood >= 2",
+        "ASSUMPTION: Inventory.iron >= 3",
+        "ASSUMPTION: Inventory.iron_pickaxe < 9",
+        "VERIFIED: Adjacent block is CRAFTING_TABLE"
+      ]
+    },
+    "MAKE_WOOD_SWORD": {
+      "make_wood_sword": [
+        "ASSUMPTION: Inventory.wood >= 2",
+        "ASSUMPTION: Inventory.wood_sword < 9",
+        "ASSUMPTION: Adjacent block is CRAFTING_TABLE"
+      ]
+    },
+    "MAKE_STONE_SWORD": {
+      "make_stone_sword": [
+        "ASSUMPTION: Inventory.wood >= 1",
+        "ASSUMPTION: Inventory.stone >= 2",
+        "ASSUMPTION: Inventory.stone_sword < 9",
+        "ASSUMPTION: Adjacent block is CRAFTING_TABLE"
+      ]
+    },
+    "MAKE_IRON_SWORD": {
+      "make_iron_sword": [
+        "ASSUMPTION: Inventory.wood >= 1",
+        "ASSUMPTION: Inventory.iron >= 2",
+        "ASSUMPTION: Inventory.iron_sword < 9",
+        "VERIFIED: Adjacent block is CRAFTING_TABLE"
+      ]
+    }
+  }
+}

@@ -77,6 +77,7 @@ class Flow:
             functions, error = validate_code(generated_code)
             if error != "":
                 print(f"Error generating: {error}")
+        breakpoint()
 
         # Save the graph evaluation
         txt_path = os.path.join(self.graph_path / str(self.current_i), "graph_eval.txt")
