@@ -7,26 +7,62 @@ def return_prompts(LLM_API_FUNCTION_GPT4):
 
     prompts["next_task"] = {
         "prompt": """
-Player Status:
-```
-$db.current.status$
-```
 
-Inventory:
-```
-$db.current.inventory$
-```
-The inventory can store a maximum of 9 of each item.
+Environment Details:
+@struct.dataclass
+class Inventory:
+    wood: int = 0
+    stone: int = 0
+    coal: int = 0
+    iron: int = 0
+    diamond: int = 0
+    sapling: int = 0
+    wood_pickaxe: int = 0
+    stone_pickaxe: int = 0
+    iron_pickaxe: int = 0
+    wood_sword: int = 0
+    stone_sword: int = 0
+    iron_sword: int = 0
+#max inventory size is 9 for each item
 
-Achievements Completed:
-```
-$db.current.achievements_completed$
-```
+# ENUMS
+class BlockType(Enum):
+    INVALID = 0
+    OUT_OF_BOUNDS = 1
+    GRASS = 2
+    WATER = 3
+    STONE = 4
+    TREE = 5
+    WOOD = 6
+    PATH = 7
+    COAL = 8
+    IRON = 9
+    DIAMOND = 10
+    CRAFTING_TABLE = 11
+    FURNACE = 12
+    SAND = 13
+    LAVA = 14
+    PLANT = 15
+    RIPE_PLANT = 16
 
-Nearby Blocks
-```
-$db.current.closest_blocks$
-```
+class Action(Enum):
+    NOOP = 0  #
+    LEFT = 1  # a
+    RIGHT = 2  # d
+    UP = 3  # w
+    DOWN = 4  # s
+    DO = 5  # space
+    SLEEP = 6  # tab
+    PLACE_STONE = 7  # r
+    PLACE_TABLE = 8  # t
+    PLACE_FURNACE = 9  # f
+    PLACE_PLANT = 10  # p
+    MAKE_WOOD_PICKAXE = 11  # 1
+    MAKE_STONE_PICKAXE = 12  # 2
+    MAKE_IRON_PICKAXE = 13  # 3
+    MAKE_WOOD_SWORD = 14  # 4
+    MAKE_STONE_SWORD = 15  # 5
+    MAKE_IRON_SWORD = 16  # 6
 
 Knowledgebase:
 ```
@@ -39,26 +75,17 @@ $db.skills$
 ```
 
 # Instruction
-Consider the player's current status, inventory, instruction manual, knowledgebase, and existing skills. Identify the next skill that should be learned. Pay special attention to the task requirements and action prerequisites from the knowledgebase.
+Consider the knowledgebase, and existing skills. Identify the next skill that should be learned. Pay special attention to the task requirements and action prerequisites from the knowledgebase.
 Fill out the following sections explicitly before arriving at the final formatted output.
-
-## Completed Achievements
-In plain text, write a list of completed achievements. Consider more then 80\% completed achievements to be complete.
-
-## Review Inventory
-In plain text, write a list of the current average number of each item. Round reasonably large decimals up, otherwise round down.
 
 ## Future Objectives
 List up to 3 potential future objectives that the player could work toward next. For each objective, briefly discuss the necessity, benefits, requirements.
-
-## Review Nearby Blocks/Objects
-In a few sentences, review and summarize the nearby blocks that may be relevant to the identified objectives.
 
 ## Review Existing Skills
 In a few sentences, review existing skills. Do not propose a skill which has already been learned.
 
 ## Immediate Objective
-Identify the next skill the player should learn based on your analysis. You should only propose skills whose requirements can be fulfilled by preexisting skills. Do not propose a skill that is preexisting. 
+Identify the next skill the player should learn based on your analysis. CRITICAL: Do NOT propose any skill that already exists in the existing skills list. You should only propose NEW skills whose requirements can be fulfilled by preexisting skills. 
 
 # Note
 - Distance/adjaceny cannot be directly tracked, but you can use the closest blocks as a proxy.
@@ -84,28 +111,11 @@ Finally, complete the following Json dictionary as your output.
 
     prompts["next_subtask"] = {
         "prompt": """
-Consider the player's current status, inventory, and Knowledgebase. 
-
-Player Status:
-```
-$db.current.status$
-```
-
-Inventory:
-```
-$db.current.inventory$
-```
-Note: The inventory can store a maximum of 9 of each.
-
+Consider the Knowledgebase and existing skills.
 
 Knowledgebase:
 ```
 $db.knowledge_base$
-```
-
-Nearby Blocks
-```
-$db.current.closest_blocks$
 ```
 
 Existing Skills
@@ -120,11 +130,6 @@ $db.current.task$
 
 # Instruction
 
-## Review Inventory
-Summarize and analyze inventory items that may be relevant to the skill to learn. Round reasonably large decimals up, otherwise round down.
-
-## Review Nearby Blocks
-Summarize and analyze the nearby blocks that may be relevant to the skill to learn.
 
 ## Analyze Knowledgebase
 Identify and draw connections between the skill to learn and any relevant existing knowledge.
@@ -146,6 +151,7 @@ In a bulleted list, write what each skill gains. The requirements/consumption di
   - a = amount of resource consumed PER unit of gain
   - b = amount of resource required but NOT consumed
   - Format examples: "lambda n: 3*n + 0" means consumed per craft, "lambda n: 0*n + 1" means required but not consumed.
+- Requirements do not support 'or'
 - Each key in requirements/consumption must be a key in the gain of an existing skill. 
   
 # Formatting
