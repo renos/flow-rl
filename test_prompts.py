@@ -12,7 +12,9 @@ sys.path.append(str(Path(__file__).parent))
 
 from flowrl.llm.craftax_classic.llm import generate_graph
 from flowrl.llm.craftax_classic.generate_code import validate_code, create_inventory_from_array
+from flowrl.skill_dependency_resolver import SkillDependencyResolver
 import numpy as np
+import json
 
 
 class PromptTester:
@@ -72,9 +74,28 @@ class PromptTester:
         
         Args:
             skill_name: Name of the skill
-            skill_code: The skill code/implementation as a string
+            skill_code: The skill code/implementation as a string or dict
         """
-        self.db["skills"][skill_name] = skill_code
+        if isinstance(skill_code, str):
+            # Parse JSON string if it's a string
+            try:
+                skill_data = json.loads(skill_code)
+            except json.JSONDecodeError:
+                # If it's not JSON, treat as raw code
+                self.db["skills"][skill_name] = skill_code
+                print(f"Added skill: {skill_name}")
+                return
+        else:
+            skill_data = skill_code
+        
+        # Store in the format expected by SkillDependencyResolver
+        skill_entry = {
+            "skill_name": skill_name,
+            "skill_with_consumption": skill_data,
+            "functions": [],  # Empty for testing
+            "iteration": 0
+        }
+        self.db["skills"][skill_name] = skill_entry
         print(f"Added skill: {skill_name}")
         
     def remove_skill(self, skill_name):
@@ -152,9 +173,19 @@ class PromptTester:
         if not self.db["skills"]:
             print("  No skills available")
         else:
-            for skill_name, skill_code in self.db["skills"].items():
+            for skill_name, skill_data in self.db["skills"].items():
                 print(f"  - {skill_name}")
-                print(f"    Code preview: {skill_code[:100]}...")
+                if isinstance(skill_data, dict) and "skill_with_consumption" in skill_data:
+                    # New format: show requirements and gains
+                    skill_info = skill_data["skill_with_consumption"]
+                    requirements = skill_info.get("requirements", {})
+                    gain = skill_info.get("gain", {})
+                    print(f"    Requirements: {requirements}")
+                    print(f"    Gain: {gain}")
+                else:
+                    # Old format: show code preview
+                    skill_str = str(skill_data)
+                    print(f"    Code preview: {skill_str[:100]}...")
         
         print("\nCURRENT INVENTORY:")
         print("=" * 30)
@@ -374,6 +405,160 @@ class PromptTester:
                 
         return results
         
+    def test_single_inventory_prompt(self, prompt_name, show_prompt=False):
+        """
+        Test a single inventory prompt.
+        
+        Args:
+            prompt_name: Name of the inventory prompt to test (e.g., "predict_item_count", "predict_missing_items")
+            show_prompt: Whether to print the formatted prompt
+            
+        Returns:
+            The LLM response
+        """
+        # Get available inventory prompts
+        from flowrl.llm.craftax_classic.prompts.inventory import return_prompts
+        from flowrl.llm.craftax_classic.llm import get_query, llm_name
+        from functools import partial
+        
+        LLM_API_FUNCTION_GPT4 = partial(get_query(llm_name), max_gen=4096)
+        inventory_prompts = return_prompts(LLM_API_FUNCTION_GPT4)
+        
+        if prompt_name not in inventory_prompts:
+            available = list(inventory_prompts.keys())
+            raise ValueError(f"Unknown inventory prompt '{prompt_name}'. Available prompts: {available}")
+        
+        if show_prompt:
+            print("="*50)
+            print(f"TESTING SINGLE INVENTORY PROMPT: {prompt_name}")
+            print("="*50)
+        
+        # Find all dependencies for this prompt
+        dependencies = self._find_inventory_dependencies(prompt_name, inventory_prompts)
+        print(f"Dependencies found: {dependencies}")
+        
+        # Create a minimal subgraph with only the necessary nodes
+        from agentkit import Graph, SimpleDBNode
+        subgraph = Graph()
+        
+        # Add only the nodes we need
+        for dep_name in dependencies:
+            if dep_name in inventory_prompts:
+                prompt_info = inventory_prompts[dep_name]
+                
+                # Create the node
+                node = SimpleDBNode(
+                    prompt_info["prompt"],
+                    prompt_info["prompt"],
+                    subgraph,
+                    prompt_info["query"],
+                    prompt_info["compose"],
+                    self.db,
+                    after_query=prompt_info.get("after_query"),
+                    verbose=True
+                )
+                subgraph.add_node(node)
+        
+        # Add edges between nodes in the subgraph
+        for dep_name in dependencies:
+            if dep_name in inventory_prompts:
+                prompt_info = inventory_prompts[dep_name]
+                current_prompt_text = prompt_info["prompt"]
+                
+                # Add dependency edges
+                if "dep" in prompt_info:
+                    for dep in prompt_info["dep"]:
+                        if dep in dependencies and dep in inventory_prompts:
+                            dep_prompt_text = inventory_prompts[dep]["prompt"]
+                            subgraph.add_edge(dep_prompt_text, current_prompt_text)
+        
+        print(f"Built inventory subgraph with {len(subgraph.nodes)} nodes")
+        
+        # Execute the minimal subgraph
+        results = subgraph.evaluate()
+        
+        # Get the target prompt text
+        target_prompt_text = inventory_prompts[prompt_name]["prompt"]
+        
+        # Find our target result
+        target_result = results.get(target_prompt_text)
+        
+        if target_result is None:
+            print(f"Warning: No result found for inventory prompt '{prompt_name}'")
+            print("Available results:")
+            for key in results.keys():
+                print(f"  - {key[:60]}...")
+            return None
+        
+        print(f"\nLLM RESPONSE for inventory prompt '{prompt_name}':")
+        print("-" * 30)
+        if isinstance(target_result, tuple):
+            print(target_result[0])
+            if len(target_result) > 1:
+                print(f"Token usage: {target_result[1]}")
+        else:
+            print(target_result)
+        print("-" * 30)
+        
+        return target_result
+    
+    def _find_inventory_dependencies(self, prompt_name, inventory_prompts, visited=None):
+        """
+        Find all dependencies for a given inventory prompt recursively.
+        
+        Args:
+            prompt_name: Name of the prompt to find dependencies for
+            inventory_prompts: Dictionary of inventory prompts
+            visited: Set of already visited prompts to avoid cycles
+            
+        Returns:
+            Set of prompt names that this prompt depends on (including itself)
+        """
+        if visited is None:
+            visited = set()
+            
+        if prompt_name in visited:
+            return set()
+            
+        visited.add(prompt_name)
+        dependencies = {prompt_name}
+        
+        if prompt_name not in inventory_prompts:
+            return dependencies
+            
+        prompt_info = inventory_prompts[prompt_name]
+        
+        # Add direct dependencies
+        if "dep" in prompt_info:
+            for dep in prompt_info["dep"]:
+                dependencies.update(self._find_inventory_dependencies(dep, inventory_prompts, visited.copy()))
+                
+        return dependencies
+    
+    def resolve_skill_dependencies(self, skill_name, n=1, max_inventory_capacity=9):
+        """
+        Resolve dependencies for a skill and return the execution order.
+        
+        Args:
+            skill_name: Name of the skill to resolve dependencies for
+            n: Number of times to apply this skill (default: 1)
+            max_inventory_capacity: Maximum inventory capacity per item (default: 9)
+            
+        Returns:
+            List of nodes/skills in execution order to fulfill the target skill
+        """
+        if skill_name not in self.db["skills"]:
+            available_skills = list(self.db["skills"].keys())
+            raise ValueError(f"Skill '{skill_name}' not found. Available skills: {available_skills}")
+        
+        # Create resolver with current skills and inventory capacity
+        resolver = SkillDependencyResolver(self.db["skills"], max_inventory_capacity)
+        
+        print(f"Resolving dependencies for '{skill_name}' with n={n}, max_inventory={max_inventory_capacity}")
+        execution_order = resolver.resolve_dependencies(skill_name, n)
+        
+        return execution_order
+        
     def test_reuse_workflow(self):
         """Test the skill reuse workflow."""
         print("Testing reuse workflow using reuse_graph.evaluate()...")
@@ -496,6 +681,14 @@ class PromptTester:
         print("Template prompts:")
         for name in self.db["temp_prompts"].keys():
             print(f"  - {name}")
+        print("Inventory prompts:")
+        from flowrl.llm.craftax_classic.prompts.inventory import return_prompts
+        from flowrl.llm.craftax_classic.llm import get_query, llm_name
+        from functools import partial
+        LLM_API_FUNCTION_GPT4 = partial(get_query(llm_name), max_gen=4096)
+        inventory_prompts = return_prompts(LLM_API_FUNCTION_GPT4)
+        for name in inventory_prompts.keys():
+            print(f"  - {name}")
             
     def show_graph_info(self):
         """Display information about the graphs."""
@@ -553,6 +746,14 @@ pipeline_results = tester.test_full_pipeline()
 # Test individual workflows
 inventory_results = tester.test_inventory_workflow()
 reuse_results = tester.test_reuse_workflow()
+
+# Test single inventory prompts
+tester.test_single_inventory_prompt("predict_item_count")
+tester.test_single_inventory_prompt("predict_missing_items")
+
+# Test skill dependency resolution
+execution_order = tester.resolve_skill_dependencies("Make Stone Sword", n=2)
+print(f"Execution order: {execution_order}")
 
 # Validate generated code (if any code was generated)
 for key, value in pipeline_results["main"].items():

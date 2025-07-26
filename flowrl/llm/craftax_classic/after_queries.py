@@ -23,7 +23,7 @@ class TaskAfterQuery(aq.JsonAfterQuery):
         parsed_answer = self.parse_json()[-1]
 
         self.node.db["current"]["skill_name"] = parsed_answer["skill_name"]
-        self.node.db["current"]["task"] = parsed_answer
+        self.node.db["current"]["skill"] = parsed_answer
 
 
 class SubtaskAfterQuery(aq.JsonAfterQuery):
@@ -36,6 +36,7 @@ class SubtaskAfterQuery(aq.JsonAfterQuery):
             "requirements",
             "consumption",
             "gain",
+            "completion_criteria",
         ]
         # self.length = len(self.keys)
 

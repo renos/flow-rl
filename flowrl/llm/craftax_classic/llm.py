@@ -13,7 +13,6 @@ from flowrl.llm.craftax_classic.after_queries import *
 from flowrl.llm.utils import get_ctxt
 from .prompts.main import return_prompts as return_simplified_prompts
 from .prompts.inventory import return_prompts as return_inventory_prompts
-from .prompts.reuse_skill import return_prompts as return_reusual_prompts
 
 try:
     import llm_api
@@ -150,7 +149,4 @@ def generate_graph(db=None, return_inventory_graph=False):
     inventory_prompts = return_inventory_prompts(LLM_API_FUNCTION_GPT4)
     inventory_graph = build_graph(inventory_prompts, db)
 
-    reusual_graph = return_reusual_prompts(LLM_API_FUNCTION_GPT4)
-    reusual_graph = build_graph(reusual_graph, db)
-
-    return db, graph, inventory_graph, reusual_graph
+    return db, graph, inventory_graph, _

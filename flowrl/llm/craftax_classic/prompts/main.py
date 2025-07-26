@@ -125,7 +125,7 @@ $db.skills$
 
 Skill to Learn
 ```
-$db.current.task$
+$db.current.skill$
 ```
 
 # Instruction
@@ -135,7 +135,7 @@ $db.current.task$
 Identify and draw connections between the skill to learn and any relevant existing knowledge.
 
 ## Task Analysis
-Explicitly analyze the current task:
+Explicitly analyze the current skill:
 - What is the core objective?
 - What are the specific requirements? 
 - What resources are consumed when applying the skill.
@@ -148,9 +148,11 @@ In a bulleted list, write what each skill gains. The requirements/consumption di
 - Skills should be explicit and complete on their own, and should convey a clear quantifiable goal. The purpose of requirements/consumption is to later parse what other skills need to be performed before applying the skill.
 - Requirements are a SUPERSET of consumption: requirements include everything needed (both consumed and non-consumed resources), while consumption only includes what gets used up.
 - Each value in requirements/consumption should be written as a Python lambda function string that takes n and returns the amount needed, in the form: "lambda n: a*n + b", where:
-  - a = amount of resource consumed PER unit of gain
-  - b = amount of resource required but NOT consumed
-  - Format examples: "lambda n: 3*n + 0" means consumed per craft, "lambda n: 0*n + 1" means required but not consumed.
+  - a = amount of resource consumed PER unit of gain (scales with n)
+  - b = amount of resource required but NOT consumed (fixed amount regardless of n)
+  - Ask yourself: "Does this requirement scale with the number of times I apply the skill?"
+    - If YES (scales with n): use "lambda n: a*n + 0" format
+    - If NO (fixed amount): use "lambda n: 0*n + b" format
 - Requirements do not support 'or'
 - Each key in requirements/consumption must be a key in the gain of an existing skill. 
   
@@ -162,6 +164,7 @@ Finally, complete the following Json dictionary as your output.
 "requirements": , # (dict) a dictionary requirements needed before the player can apply the skill. Each key must exactly match the key of a gain of a previous skill.
 "consumption": , # (dict): a dictionary of what resources are consumed by applying the skill. Each key must exactly match the key of a gain of a previous skill.
 "gain": , # (dict) a dictionary of what is gained by applying the skill. The gain for the skill goal should be n.
+"completion_criteria": , # (string) description of when this skill is considered complete
 }
 ```
         """,
@@ -244,7 +247,6 @@ The reward function is calculated independently at each timestep using these ava
 - closest_bocks_changes (numpy.ndarray): The changes in distance to closest blocks of each type from the last timestep to the current timestep. Decreases in distance are positive. If an item has moves from being unseen to seen, the default will be 30-current_distance. E.g. if a table is placed in front of the player, the distanc diff will be 29.
 - player_intrinsics (jnp.ndarray): The intrinsic values
 - player_intrinsics_diff (jnp.ndarray): The changes in current intrinsic values from the last timestep to the current timestep.
-- Achievement diff (jnp.ndarray): A 1D array (22,) of boolean indicating whether an achievement was completed in the last timestep. If the achievement was already completed previously, it will not indicate the achievement was completed again. Do not use this as a reward factor if the subtask requires collecting multiple of an item.
 
 
 # Other Information
@@ -262,11 +264,12 @@ $db.current.skill_with_consumption$
 
 # Steps
 Explicitly complete the following steps before arriving at your final formatted output
-0. Analyze Skill requirements and identify appropriate reward factors:
+0. Analyze Skill Gains and identify appropriate reward factors:
    - What is the core objective of this subtask?
    - What specific behaviors or outcomes need to be rewarded?
    - For each available factor, determine if it can provide meaningful feedback for the required behaviors
    - Remove any factors that are irrelevant to the subtask objectives or should not be used.
+   - Assume all requirements for the skill has been met before the skill is applied.
    List the remaining factors that will be analyzed in subsequent steps.
 1. Analyze each factor's per-timestep behavior, responding to each question explicitly:
    - How does the raw factor behave at each individual timestep?
@@ -377,9 +380,9 @@ class Achievement(Enum):
 
 #Here are example docstrings:
 
-def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev, player_intrinsics, player_intrinsics_diff, achievements):
+def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev, player_intrinsics, player_intrinsics_diff, achievements, n):
     \"\"\"
-    Determines whether Task `$db.current.subtask_name$` is complete.
+    Determines whether Task `$db.current.skill_name$` is complete.
     Do not call external functions or make any assumptions beyond the information given to you.
 
     Args:
@@ -393,16 +396,17 @@ def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev,
         player_intrinsics (jnp.ndarray): An len 4 array representing the player's health, food, drink, and energy levels
         player_intrinsics_diff (jnp.ndarray): An len 4 array representing the change in the player's health, food, drink, and energy levels
         achievements (jnp.ndarray): A 1D array (22,) of achievements, where each element is an boolean indicating the corresponding achievement has been completed.
+        n (int): The number of times this skill has been applied/attempted
 
     Returns:
-        bool: True if complete (i.e., $db.current.subtask.completion_criteria$), False otherwise.
+        bool: True if complete (i.e., $db.current.skill_with_consumption.completion_criteria$), False otherwise.
     \"\"\"
     return TODO
 
 
 def task_reward(inventory_diff, closest_blocks, closest_blocks_prev, player_intrinsics_diff, achievements_diff, health_penalty):
     \"\"\"
-    Calculates the reward for Task `$db.current.subtask_name$` based on changes in inventory and other factors.
+    Calculates the reward for Task `$db.current.skill_name$` based on changes in inventory and other factors.
     Do not call external functions or make any assumptions beyond the information given to you.
 
     Args:
@@ -438,9 +442,9 @@ def task_network_number():
     \"\"\"
     return TODO
 
-Given the above documentations, implement the `task_is_done`, `task_reward`, and task_network_number function for the subtask `$db.current.subtask_name$` with the following details:
+Given the above documentations, implement the `task_is_done`, `task_reward`, and task_network_number function for the subtask `$db.current.skill_name$` with the following details:
 ```json
-$db.current.subtask$
+$db.current.skill_with_consumption$
 $db.current.reward$
 ```
 The dense reward to include is:

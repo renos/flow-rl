@@ -113,15 +113,17 @@ if __name__ == "__main__":
     flow_graph = Flow(args)
 
     while flow_graph.current_i < args.max_nodes:
-        print(f"Current node: {flow_graph.current_i}")
-        print(f"Previous node: {flow_graph.previous_i}")
+        print(f"Current iteration: {flow_graph.current_i}")
+        print(f"Previous iteration: {flow_graph.previous_i}")
         current_i_save = flow_graph.current_i
-        previoius_i_save = flow_graph.previous_i
+        previous_i_save = flow_graph.previous_i
 
-        # Generate the next node
-        next_node_code = flow_graph.next_node()
-        flow_graph.add_node(next_node_code)
-
+        # Generate the next skill
+        skill_name, skill_data = flow_graph.next_skill()
+        flow_graph.add_skill(skill_name, skill_data)
+        
+        # Build dependency graph for this skill and write code
+        flow_graph.build_skill_dependency_graph(skill_name)
         flow_graph.write_code()
 
         args.module_path = str(
@@ -142,11 +144,15 @@ if __name__ == "__main__":
         out, success = run_ppo(args, training_state_i=flow_graph.current_i + 1)
 
         if not success:
-            print(f"Node {flow_graph.current_i} failed to train")
+            print(f"Skill {skill_name} at iteration {flow_graph.current_i} failed to train")
             flow_graph.current_i = current_i_save
+            flow_graph.previous_i = previous_i_save
+            # Remove the failed skill
+            if skill_name in flow_graph.skills:
+                del flow_graph.skills[skill_name]
             continue
-        code_string = "\n".join(next_node_code)
 
+        # Generate frames and test the skill
         frames, states, env_states, actions = gen_frames_hierarchical(
             policy_path=Path(args.graph_path)
             / str(flow_graph.current_i)
@@ -154,30 +160,31 @@ if __name__ == "__main__":
             max_num_frames=2000,
             goal_state=flow_graph.current_i + 1,
         )
-        missing_resources = flow_graph.explain_trajectory(env_states, actions)
-
-        if len(missing_resources) > 0:
-            flow_graph.precollect_resources(missing_resources)
-            flow_graph.write_code()
-            args.module_path = str(
-                Path(args.graph_path)
-                / str(flow_graph.current_i)
-                / f"{flow_graph.current_i}.py"
-            )
-            # load from previous checkpoint since we're essencially continuining trainig with new nodes but same skills
-            args.prev_module_path = args.module_path
+        
+        # Test final success rate
         args.success_state_rate = 0.8
         out, success = run_ppo(args, training_state_i=flow_graph.current_i + 1)
 
         if not success:
-            print(f"Node {flow_graph.current_i} failed to train")
+            print(f"Skill {skill_name} at iteration {flow_graph.current_i} failed final training")
             flow_graph.current_i = current_i_save
+            flow_graph.previous_i = previous_i_save
+            # Remove the failed skill
+            if skill_name in flow_graph.skills:
+                del flow_graph.skills[skill_name]
             continue
 
-        flow_graph.update_db(out, code_string)
+        flow_graph.update_db(out, skill_name, skill_data)
 
+        # Save video and advance to next iteration
         video_path = Path(args.graph_path) / str(flow_graph.current_i) / "video.mp4"
         render_video(frames, states, video_path=video_path)
+        
+        # Save skill data to file
+        skill_data_path = Path(args.graph_path) / str(flow_graph.current_i) / "skills.json"
+        with open(skill_data_path, "w") as f:
+            import json
+            json.dump({"data": flow_graph.skills}, f, indent=2)
 
         flow_graph.previous_i = flow_graph.current_i
         flow_graph.current_i += 1
