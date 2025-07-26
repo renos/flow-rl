@@ -58,10 +58,12 @@ In a few sentences, review and summarize the nearby blocks that may be relevant 
 In a few sentences, review existing skills. Do not propose a skill which has already been learned.
 
 ## Immediate Objective
-Identify the next skill the player should learn based on your analysis. You should only propose skills whose requirements can be fulfilled by preexisting skills.
+Identify the next skill the player should learn based on your analysis. You should only propose skills whose requirements can be fulfilled by preexisting skills. Do not propose a skill that is preexisting. 
 
 # Note
 - Distance/adjaceny cannot be directly tracked, but you can use the closest blocks as a proxy.
+- Write gain in terms of n, the number of times a skill will be performed. For each requirement, write it in terms of n if the skill consumes that requirement.
+
 
 # Formatting
 Finally, complete the following Json dictionary as your output.
@@ -108,7 +110,7 @@ $db.current.closest_blocks$
 
 Existing Skills
 ```
-$db.current.task$
+$db.skills$
 ```
 
 Skill to Learn
@@ -133,17 +135,26 @@ Explicitly analyze the current task:
 - What are the specific requirements? 
 - What resources are consumed when applying the skill.
 
+## Previous Skill Analysis
+In a bulleted list, write what each skill gains. The requirements/consumption dictionarys for the current skill must be written soley in terms of the gains of existing skills.
+
 # Note
 - Distance/adjaceny CANNOT be directly verified or quantified, but you can use the closest blocks as a proxy.
 - Skills should be explicit and complete on their own, and should convey a clear quantifiable goal. The purpose of requirements/consumption is to later parse what other skills need to be performed before applying the skill.
+- Requirements are a SUPERSET of consumption: requirements include everything needed (both consumed and non-consumed resources), while consumption only includes what gets used up.
+- Each value in requirements/consumption should be written as a Python lambda function string that takes n and returns the amount needed, in the form: "lambda n: a*n + b", where:
+  - a = amount of resource consumed PER unit of gain
+  - b = amount of resource required but NOT consumed
+  - Format examples: "lambda n: 3*n + 0" means consumed per craft, "lambda n: 0*n + 1" means required but not consumed.
+- Each key in requirements/consumption must be a key in the gain of an existing skill. 
   
 # Formatting
 Finally, complete the following Json dictionary as your output.
 ```json
 {
 "skill_name": , # name of the current skill
-"requirements": , # (str) list of requirements needed before the player can apply the skill.
-"consumption": , # (dict): a dictionary of what resources are consumed by applying the skill. Write consumption in terms of n, the number of gain when applying the skill.
+"requirements": , # (dict) a dictionary requirements needed before the player can apply the skill. Each key must exactly match the key of a gain of a previous skill.
+"consumption": , # (dict): a dictionary of what resources are consumed by applying the skill. Each key must exactly match the key of a gain of a previous skill.
 "gain": , # (dict) a dictionary of what is gained by applying the skill. The gain for the skill goal should be n.
 }
 ```

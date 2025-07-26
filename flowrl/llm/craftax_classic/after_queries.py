@@ -36,7 +36,6 @@ class SubtaskAfterQuery(aq.JsonAfterQuery):
             "requirements",
             "consumption",
             "gain",
-            "completion_criteria",
         ]
         # self.length = len(self.keys)
 
