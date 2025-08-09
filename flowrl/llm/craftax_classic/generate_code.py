@@ -79,7 +79,7 @@ def validate_code(generated_code):
     return functions, ""
 
 
-def generate_validated_py(functions, file_path, task_num):
+def generate_validated_py(functions, file_path, task_num, n=1):
     if task_num == 0:
         with open(file_path, "w") as f:
             f.write("from craftax.craftax_classic.constants import *\n")
@@ -103,6 +103,13 @@ def generate_validated_py(functions, file_path, task_num):
     modified_functions[2] = functions[2].replace(
         "task_network_number", f"task_{task_num}_network_number"
     )
+    
+    # Replace the default n parameter in task_is_done function with the actual count
+    import re
+    # Pattern to match 'n)' at the end of function signature and replace with 'n={count})'
+    pattern = r'(\w+, n)\):'
+    replacement = f'\\1={n}):'
+    modified_functions[0] = re.sub(pattern, replacement, modified_functions[0])
 
     with open(file_path, "a") as f:
         f.write(modified_functions[0] + "\n")

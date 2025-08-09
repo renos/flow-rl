@@ -79,11 +79,14 @@ def verify_function(functions):
             player_intrinsics,
             intrinsics_diff,
             achievements,
+            1,  # n parameter
         )
         assert jnp.isscalar(res)
         # Test vmap with actual batched parameters
         vmapped_is_task_done = jax.vmap(is_task_done)
 
+        batched_n = jnp.repeat(jnp.array([1]), batch_size, axis=0)
+        
         vmapped_is_task_done(
             batched_inventory,
             batched_inventory_diff,
@@ -92,6 +95,7 @@ def verify_function(functions):
             batched_player_intrinsics,
             batched_intrinsics_diff,
             batched_achievements,
+            batched_n,
         )
 
         is_task_done_sucessful = True
@@ -130,5 +134,5 @@ def verify_function(functions):
         task_reward_sucessful,
         task_reward_exception,
     )
-    # print(namespace["task_is_done"](inventory, closest_blocks, player_intrinsics))
+    # print(namespace["task_is_done"](inventory, inventory_diff, closest_blocks, closest_blocks_prev, player_intrinsics, intrinsics_diff, achievements, 1))
     # print(namespace["task_reward"](inventory_diff, closest_blocks, health_penalty))

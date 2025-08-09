@@ -71,7 +71,7 @@ $db.knowledge_base$
 
 Existing Skills:
 ```
-$db.skills$
+$db.skills_without_code$
 ```
 
 # Instruction
@@ -87,10 +87,6 @@ In a few sentences, review existing skills. Do not propose a skill which has alr
 ## Immediate Objective
 Identify the next skill the player should learn based on your analysis. CRITICAL: Do NOT propose any skill that already exists in the existing skills list. You should only propose NEW skills whose requirements can be fulfilled by preexisting skills. 
 
-# Note
-- Distance/adjaceny cannot be directly tracked, but you can use the closest blocks as a proxy.
-- Write gain in terms of n, the number of times a skill will be performed. For each requirement, write it in terms of n if the skill consumes that requirement.
-
 
 # Formatting
 Finally, complete the following Json dictionary as your output.
@@ -98,7 +94,6 @@ Finally, complete the following Json dictionary as your output.
 {
 "skill_name": # name of the objective
 "description": # (string) 1-line description of the objective
-"requirements": # (string) requirements for the objective.
 "gain": # (str) what the player will gain after applying the skill. 
 }
 ```
@@ -141,7 +136,10 @@ Explicitly analyze the current skill:
 - What resources are consumed when applying the skill.
 
 ## Previous Skill Analysis
-In a bulleted list, write what each skill gains. The requirements/consumption dictionarys for the current skill must be written soley in terms of the gains of existing skills.
+In a bulleted list, write what each skill gains. The requirements and consumption dictionaries for the current skill must be written solely in terms of the gains of existing skills.
+
+## Ephemeral Analysis
+Determine if this skill is ephemeral. A skill is ephemeral if the gain itself is not observable in the inventory. 
 
 # Note
 - Distance/adjaceny CANNOT be directly verified or quantified, but you can use the closest blocks as a proxy.
@@ -156,15 +154,16 @@ In a bulleted list, write what each skill gains. The requirements/consumption di
 - Requirements do not support 'or'
 - Each key in requirements/consumption must be a key in the gain of an existing skill. 
   
+  
 # Formatting
 Finally, complete the following Json dictionary as your output.
 ```json
 {
 "skill_name": , # name of the current skill
-"requirements": , # (dict) a dictionary requirements needed before the player can apply the skill. Each key must exactly match the key of a gain of a previous skill.
-"consumption": , # (dict): a dictionary of what resources are consumed by applying the skill. Each key must exactly match the key of a gain of a previous skill.
+"requirements": , # (dict) total amount needed available using "lambda n: a*n + b" format. Each key must exactly match the key of a gain of a previous skill.
+"consumption": , # (dict) amount consumed using "lambda n: a*n + b" format. Each key must exactly match the key of a gain of a previous skill.
 "gain": , # (dict) a dictionary of what is gained by applying the skill. The gain for the skill goal should be n.
-"completion_criteria": , # (string) description of when this skill is considered complete
+"ephemeral": , # (bool) true if the gain itself is not observable in the inventory, false if the gain appears directly in the inventory
 }
 ```
         """,
@@ -396,10 +395,10 @@ def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev,
         player_intrinsics (jnp.ndarray): An len 4 array representing the player's health, food, drink, and energy levels
         player_intrinsics_diff (jnp.ndarray): An len 4 array representing the change in the player's health, food, drink, and energy levels
         achievements (jnp.ndarray): A 1D array (22,) of achievements, where each element is an boolean indicating the corresponding achievement has been completed.
-        n (int): The number of times this skill has been applied/attempted
+        n (int): The target amount to reach in inventory for the main gain item.
 
     Returns:
-        bool: True if complete (i.e., $db.current.skill_with_consumption.completion_criteria$), False otherwise.
+        bool: True if the main gain item in inventory has reached the target amount n, False otherwise.
     \"\"\"
     return TODO
 
@@ -456,6 +455,19 @@ The current number of skills is:
 ```json
 $db.current.num_skills$
 ```
+
+## Implementation Guidelines:
+
+For `task_is_done`: 
+- Identify the main gain item from the skill's "gain" dictionary (the item with the highest gain value)
+- Check if the current inventory amount of that main gain item is >= n (the target amount)
+- Return True when the target amount is reached, False otherwise
+- Use inventory.{item_name} to access inventory amounts (e.g., inventory.wood, inventory.stone)
+- If a skill is ephemeral, the inventory does not suffice, so for completion criteria you can use closest_blocks or if that doesn't work achievements.
+
+For `task_reward` and `task_network_number`:
+- Follow the existing reward structure and network numbering as before
+
 The task network number should be num_skills since we're creating a new skill and the networks are zero indexed.
 Do not change the function signature or the docstrings. Do not make any assumptions beyond the information given to you. 
 The code you write should be able to be jax compiled, no if statements.

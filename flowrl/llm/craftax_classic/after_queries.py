@@ -12,18 +12,70 @@ class TaskAfterQuery(aq.JsonAfterQuery):
         self.required_keys = [
             "skill_name",
             "description",
-            "requirements",
+            #"requirements",
             "gain",
-            "completion_criteria",
         ]
         # self.length = len(self.keys)
+
+    def validate_unique_gains(self, parsed_answer):
+        """
+        Validate that at least one gain key is not already produced by existing skills.
+        Returns (is_valid, conflicting_gains, existing_gains)
+        """
+        # Get existing skills from database
+        existing_skills = self.node.db.get("skills", {})
+        
+        # Collect all existing gains from previous skills
+        existing_gains = set()
+        for skill_name, skill_data in existing_skills.items():
+            skill_with_consumption = skill_data.get("skill_with_consumption", {})
+            gain = skill_with_consumption.get("gain", {})
+            if isinstance(gain, dict):
+                existing_gains.update(gain.keys())
+            elif isinstance(gain, str) and gain:  # Handle legacy string gains
+                existing_gains.add(gain)
+        
+        # Check new skill's gains
+        new_gain = parsed_answer.get("gain", {})
+        if isinstance(new_gain, dict):
+            new_gains = set(new_gain.keys())
+        elif isinstance(new_gain, str):
+            new_gains = {new_gain} if new_gain else set()
+        else:
+            new_gains = set()
+        
+        # Find overlapping gains
+        conflicting_gains = new_gains & existing_gains
+        
+        # Valid if there's at least one unique gain
+        is_valid = len(new_gains - existing_gains) > 0
+        
+        return is_valid, conflicting_gains, existing_gains
 
     def post_process(self):
 
         parsed_answer = self.parse_json()[-1]
 
+        # Validate that at least one gain is unique
+        is_valid, conflicting_gains, existing_gains = self.validate_unique_gains(parsed_answer)
+        
+        if not is_valid:
+            print(f"All gains already exist in previous skills: {conflicting_gains}")
+            print(f"Existing gains from previous skills: {existing_gains}")
+            print("Restarting graph processing to generate a skill with novel gains...")
+            
+            # Raise custom exception to restart the entire graph
+            raise RestartGraphException(
+                f"All gains {list(conflicting_gains)} already exist in previous skills. Need at least one unique gain. Existing gains: {list(existing_gains)}. The skill you proposed already exists, propose another one."
+            )
+
         self.node.db["current"]["skill_name"] = parsed_answer["skill_name"]
         self.node.db["current"]["skill"] = parsed_answer
+
+
+class RestartGraphException(Exception):
+    """Custom exception to signal that the graph should be restarted"""
+    pass
 
 
 class SubtaskAfterQuery(aq.JsonAfterQuery):
@@ -34,16 +86,55 @@ class SubtaskAfterQuery(aq.JsonAfterQuery):
         self.required_keys = [
             "skill_name",
             "requirements",
-            "consumption",
             "gain",
-            "completion_criteria",
         ]
         # self.length = len(self.keys)
 
+    def validate_requirements_against_existing_gains(self, parsed_answer):
+        """
+        Validate that all keys in requirements/consumption exist as gains in previous skills.
+        Returns (is_valid, invalid_keys, available_gains)
+        """
+        # Get existing skills from database
+        existing_skills = self.node.db.get("skills", {})
+        
+        # Collect all available gains from existing skills
+        available_gains = set()
+        for skill_name, skill_data in existing_skills.items():
+            skill_with_consumption = skill_data.get("skill_with_consumption", {})
+            gain = skill_with_consumption.get("gain", {})
+            available_gains.update(gain.keys())
+        
+        # Check requirements
+        requirements = parsed_answer.get("requirements", {})
+        consumption = parsed_answer.get("consumption", {})
+        
+        # Find invalid keys
+        invalid_req_keys = set(requirements.keys()) - available_gains
+        invalid_cons_keys = set(consumption.keys()) - available_gains
+        
+        all_invalid_keys = invalid_req_keys | invalid_cons_keys
+        
+        is_valid = len(all_invalid_keys) == 0
+        
+        return is_valid, all_invalid_keys, available_gains
+
     def post_process(self):
-
         parsed_answer = self.parse_json()[-1]
-
+        
+        # Validate requirements/consumption against existing skill gains
+        is_valid, invalid_keys, available_gains = self.validate_requirements_against_existing_gains(parsed_answer)
+        
+        if not is_valid:
+            print(f"Invalid keys found in requirements/consumption: {invalid_keys}")
+            print(f"Available gains from previous skills: {available_gains}")
+            print("Restarting graph processing...")
+            
+            # Raise custom exception to restart the entire graph
+            raise RestartGraphException(
+                f"Keys {list(invalid_keys)} in requirements/consumption are not available as gains from previous skills. Available gains: {list(available_gains)}"
+            )
+        
         self.node.db["current"]["skill_with_consumption"] = parsed_answer
 
 
@@ -316,7 +407,7 @@ class Achievement(Enum):
 
 #Here are example docstrings:
 
-def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev, player_intrinsics, achievements):
+def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev, player_intrinsics, player_intrinsics_diff, achievements, n):
     \"\"\"
     Determines whether Task is complete.
     Do not call external functions or make any assumptions beyond the information given to you.
@@ -329,7 +420,9 @@ def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev,
         closest_blocks_prev (numpy.ndarray): A 3D array of shape (len(BlockType), 2, K) representing the K closest blocks of each type from the previous timestep, 
         #default of 30,30 if less then k seen, ordered by distance (so :,:,0 would be the closest of each block type
         player_intrinsics (jnp.ndarray): An len 4 array representing the player's health, food, drink, and energy levels
-        achievements_diff (jnp.ndarray): A 1D array (22,) of achievements, where each element is a boolean indicating whether the corresponding achievement has been completed in the last timestep.
+        player_intrinsics_diff (jnp.ndarray): An len 4 array representing the change in the player's health, food, drink, and energy levels
+        achievements (jnp.ndarray): A 1D array (22,) of achievements, where each element is an boolean indicating the corresponding achievement has been completed.
+        n (int): The number of times this skill has been applied/attempted
 
     Returns:
         bool: True if Task is complete (i.e., if the inventory contains at least 8 units of wood), False otherwise.
@@ -383,3 +476,136 @@ Keep the reward simple, do not try to over optimize. The reward can be as simple
                 )
             )
             self.node.graph.add_edge_temporary(self.node.key, node_prompt)
+
+
+class SkillUpdateAfterQuery(aq.JsonAfterQuery):
+    """Handles results from update_skill_from_trajectory prompt"""
+    
+    def __init__(self):
+        super().__init__()
+        self.type = dict
+        self.required_keys = ["skill_name", "updated_requirements", "updated_gain"]
+
+    def validate_requirements_against_existing_gains(self, parsed_answer):
+        """
+        Validate that all keys in updated_requirements/updated_consumption exist as gains in previous skills.
+        Returns (is_valid, invalid_keys, available_gains)
+        """
+        # Get existing skills from database
+        existing_skills = self.node.db.get("skills", {})
+        
+        # Collect all available gains from existing skills
+        available_gains = set()
+        for skill_name, skill_data in existing_skills.items():
+            skill_with_consumption = skill_data.get("skill_with_consumption", {})
+            gain = skill_with_consumption.get("gain", {})
+            available_gains.update(gain.keys())
+        
+        # Check updated requirements and consumption
+        updated_requirements = parsed_answer.get("updated_requirements", {})
+        updated_consumption = parsed_answer.get("updated_consumption", {})
+        
+        # Find invalid keys
+        invalid_req_keys = set(updated_requirements.keys()) - available_gains
+        invalid_cons_keys = set(updated_consumption.keys()) - available_gains
+        
+        all_invalid_keys = invalid_req_keys | invalid_cons_keys
+        
+        is_valid = len(all_invalid_keys) == 0
+        
+        return is_valid, all_invalid_keys, available_gains
+
+    def post_process(self):
+        parsed_answer = self.parse_json()[-1]
+        
+        # Validate updated requirements/consumption against existing skill gains
+        is_valid, invalid_keys, available_gains = self.validate_requirements_against_existing_gains(parsed_answer)
+        
+        if not is_valid:
+            print(f"Invalid keys found in updated requirements/consumption: {invalid_keys}")
+            print(f"Available gains from previous skills: {available_gains}")
+            print("Restarting update_skill_from_trajectory node...")
+            
+            # Raise AfterQueryError to restart just this node
+            raise aq.AfterQueryError(
+                "Invalid updated requirements/consumption keys", 
+                f"Keys {list(invalid_keys)} in updated requirements/consumption are not available as gains from previous skills. Available gains: {list(available_gains)}"
+            )
+        
+        # Store the results for use by flow.py
+        self.node.db["current"]["skill_update_results"] = parsed_answer
+
+
+class KnowledgeBaseUpdateAfterQuery(aq.JsonAfterQuery):
+    """Handles results from propose_knowledge_base_updates prompt"""
+    
+    def __init__(self):
+        super().__init__()
+        self.type = dict
+        self.required_keys = ["proposed_updates"]
+
+    def validate_knowledge_base_paths(self, parsed_answer):
+        """Validate that all paths in proposed_updates are valid knowledge base paths"""
+        kb = self.node.db.get("knowledge_base", {})
+        
+        for update in parsed_answer.get("proposed_updates", []):
+            path = update.get("path", [])
+            if not path:
+                raise aq.AfterQueryError("Invalid path", "Empty path in knowledge base update proposal")
+            
+            # Navigate through the knowledge base using the path
+            current = kb
+            for i, key in enumerate(path):
+                if not isinstance(current, dict) or key not in current:
+                    raise aq.AfterQueryError("Invalid path", f"Path {path} is invalid at key '{key}' (position {i})")
+                current = current[key]
+            
+            # Check that the final item is a list (since KB entries are requirement lists)
+            if not isinstance(current, list):
+                raise aq.AfterQueryError("Invalid path", f"Path {path} does not point to a list, got {type(current)}")
+
+    def apply_knowledge_base_updates(self, parsed_answer):
+        """Apply validated updates directly to the knowledge base"""
+        kb = self.node.db.get("knowledge_base", {})
+        updates_applied = []
+        
+        for update in parsed_answer.get("proposed_updates", []):
+            path = update.get("path", [])
+            updated_requirements = update.get("updated_requirements", [])
+            reason = update.get("reason_for_update", "")
+            
+            # Navigate to the target location in the knowledge base
+            current = kb
+            for key in path[:-1]:  # All keys except the last one
+                current = current[key]
+            
+            # Get the final key and update the requirements list
+            final_key = path[-1]
+            old_requirements = current[final_key].copy()  # Keep a copy of old requirements
+            current[final_key] = updated_requirements
+            
+            updates_applied.append({
+                "path": path,
+                "old_requirements": old_requirements,
+                "new_requirements": updated_requirements,
+                "reason": reason
+            })
+            
+            print(f"Updated KB at {' -> '.join(path)}")
+            print(f"  Old: {old_requirements}")
+            print(f"  New: {updated_requirements}")
+            print(f"  Reason: {reason}")
+        
+        return updates_applied
+
+    def post_process(self):
+        parsed_answer = self.parse_json()[-1]
+        
+        # Validate knowledge base paths
+        self.validate_knowledge_base_paths(parsed_answer)
+        
+        # Apply updates directly to the knowledge base
+        updates_applied = self.apply_knowledge_base_updates(parsed_answer)
+        
+        # Store record of what was updated
+        self.node.db["current"]["kb_updates_applied"] = updates_applied

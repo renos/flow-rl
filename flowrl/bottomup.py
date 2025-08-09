@@ -17,7 +17,7 @@ if __name__ == "__main__":
         default=1024,
     )
     parser.add_argument(
-        "--total_timesteps", type=lambda x: int(float(x)), default=1e7
+        "--total_timesteps", type=lambda x: int(float(x)), default=1e8
     )  # Allow scientific notation
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--num_steps", type=int, default=64)
@@ -115,9 +115,18 @@ if __name__ == "__main__":
     while flow_graph.current_i < args.max_nodes:
         print(f"Current iteration: {flow_graph.current_i}")
         print(f"Previous iteration: {flow_graph.previous_i}")
-        current_i_save = flow_graph.current_i
-        previous_i_save = flow_graph.previous_i
 
+        # Clean up any stale files from previous runs of this iteration
+        current_iter_dir = Path(args.graph_path) / str(flow_graph.current_i)
+        if current_iter_dir.exists():
+            print(f"Cleaning up existing directory for iteration {flow_graph.current_i}")
+            shutil.rmtree(current_iter_dir)
+        
+        # Create checkpoint BEFORE any skill generation - this represents the clean state
+        # loaded from previous_i, ready to start current_i fresh
+        checkpoint_name = f"before_skill_{flow_graph.current_i}"
+        flow_graph.create_checkpoint(checkpoint_name)
+        
         # Generate the next skill
         skill_name, skill_data = flow_graph.next_skill()
         flow_graph.add_skill(skill_name, skill_data)
@@ -141,15 +150,19 @@ if __name__ == "__main__":
             else None
         )
         args.success_state_rate = 0.05
-        out, success = run_ppo(args, training_state_i=flow_graph.current_i + 1)
+        out, success = run_ppo(args, training_state_i=len(flow_graph.execution_order))
 
         if not success:
             print(f"Skill {skill_name} at iteration {flow_graph.current_i} failed to train")
-            flow_graph.current_i = current_i_save
-            flow_graph.previous_i = previous_i_save
-            # Remove the failed skill
-            if skill_name in flow_graph.skills:
-                del flow_graph.skills[skill_name]
+            print("Restoring from checkpoint...")
+            
+            # Clean up the failed iteration directory before restoring
+            current_iter_dir = Path(args.graph_path) / str(flow_graph.current_i)
+            if current_iter_dir.exists():
+                print(f"Cleaning up failed iteration directory: {current_iter_dir}")
+                shutil.rmtree(current_iter_dir)
+            
+            flow_graph.restore_checkpoint(checkpoint_name)
             continue
 
         # Generate frames and test the skill
@@ -158,23 +171,44 @@ if __name__ == "__main__":
             / str(flow_graph.current_i)
             / f"{flow_graph.current_i}_policies",
             max_num_frames=2000,
-            goal_state=flow_graph.current_i + 1,
+            goal_state=len(flow_graph.execution_order),
         )
+        
+        # Analyze trajectory and update knowledge base
+        flow_graph.explain_trajectory(env_states, actions, len(flow_graph.execution_order)-1)
+        
+        # Rebuild dependency graph since skill requirements may have changed
+        flow_graph.build_skill_dependency_graph(skill_name)
+        flow_graph.write_code()
+        
+        # Update module paths - previous is now the same as current since skill was partially trained
+        args.prev_module_path = args.module_path
         
         # Test final success rate
         args.success_state_rate = 0.8
-        out, success = run_ppo(args, training_state_i=flow_graph.current_i + 1)
+        out, success = run_ppo(args, training_state_i=len(flow_graph.execution_order))
 
         if not success:
             print(f"Skill {skill_name} at iteration {flow_graph.current_i} failed final training")
-            flow_graph.current_i = current_i_save
-            flow_graph.previous_i = previous_i_save
-            # Remove the failed skill
-            if skill_name in flow_graph.skills:
-                del flow_graph.skills[skill_name]
+            print("Restoring from checkpoint...")
+            
+            # Clean up the failed iteration directory before restoring
+            current_iter_dir = Path(args.graph_path) / str(flow_graph.current_i)
+            if current_iter_dir.exists():
+                print(f"Cleaning up failed iteration directory: {current_iter_dir}")
+                shutil.rmtree(current_iter_dir)
+            
+            flow_graph.restore_checkpoint(checkpoint_name)
             continue
 
         flow_graph.update_db(out, skill_name, skill_data)
+        
+        # Create and save successful checkpoint to disk, then clean up
+        success_checkpoint_name = f"successful_skill_{flow_graph.current_i}_{skill_name}"
+        flow_graph.create_checkpoint(success_checkpoint_name)
+        flow_graph.save_checkpoint_to_disk(success_checkpoint_name)
+        flow_graph.cleanup_checkpoint(success_checkpoint_name)  # Remove from memory after saving to disk
+        flow_graph.cleanup_checkpoint(checkpoint_name)  # Clean up the original checkpoint
 
         # Save video and advance to next iteration
         video_path = Path(args.graph_path) / str(flow_graph.current_i) / "video.mp4"

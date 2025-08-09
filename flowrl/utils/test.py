@@ -47,31 +47,42 @@ class Transition(NamedTuple):
     info: jnp.ndarray
 
 
-def load_policy_params(path, verbose=False):
+def load_policy_params(path, verbose=True):
     # Step 1: Load the Policy Parameters
     orbax_checkpointer = PyTreeCheckpointer()
     options = CheckpointManagerOptions(max_to_keep=1, create=True)
     policies_dir = f"{path}/policies"
+    
+    print(f"Loading checkpoints from: {policies_dir}")
 
     try:
         # Find the checkpoint with the largest timestep using max() and a generator expression
+        all_checkpoints = glob(policies_dir + "/*")
+        print(f"Found checkpoints: {all_checkpoints}")
+        
+        if not all_checkpoints:
+            raise Exception("No checkpoint files found")
+            
         latest_checkpoint = max(
-            glob(policies_dir + "/*"), key=lambda cp: float(cp.split("/")[-1])
+            all_checkpoints, key=lambda cp: float(cp.split("/")[-1])
         )
         largest_timestep = latest_checkpoint.split("/")[-1]
-        if verbose:
-            print(
-                f"The latest checkpoint is at: {latest_checkpoint} with timestep {largest_timestep}"
-            )
-    except ValueError:
+        print(f"Loading checkpoint: {latest_checkpoint} with timestep {largest_timestep}")
+        
+    except ValueError as e:
         # This handles the case where checkpoint names don't convert to float properly
-        print("Checkpoint names are not properly formatted as floats.")
+        print(f"Checkpoint names are not properly formatted as floats: {e}")
+        print(f"Available files: {glob(policies_dir + '/*')}")
+        raise
     except Exception as e:
         # Handle other exceptions, such as no files matching the glob pattern
         print(f"No valid checkpoints found. Error: {e}")
+        print(f"Policies directory exists: {os.path.exists(policies_dir)}")
+        raise
 
     checkpoint_manager = CheckpointManager(policies_dir, orbax_checkpointer, options)
     train_state = checkpoint_manager.restore(largest_timestep)
+    print(f"Successfully loaded checkpoint with keys: {list(train_state.keys()) if train_state else 'None'}")
     return train_state
 
 
@@ -140,7 +151,114 @@ from craftax.craftax_classic.renderer import render_craftax_pixels
 import numpy as np
 
 
-def gen_frames_hierarchical(policy_path, max_num_frames=2000, goal_state=None):
+def evaluate_goal_state_achievement(policy_path, max_num_frames=2000, goal_state=None, num_envs=128, max_attempts=20):
+    """
+    Fast parallel evaluation to check if agent can achieve goal_state.
+    No frame rendering - just check if any environment reaches the goal.
+    
+    Args:
+        policy_path: Path to trained policy
+        max_num_frames: Max frames per rollout attempt
+        goal_state: Target state to achieve
+        num_envs: Number of parallel environments
+        max_attempts: Maximum number of rollout attempts
+    
+    Returns:
+        bool: True if goal_state was achieved, False otherwise
+    """
+    config_path = f"{policy_path}/config.yaml"
+    with open(config_path, "r") as f:
+        config_ = yaml.load(f, Loader=yaml.FullLoader)
+    config = {
+        k.upper(): v["value"] if type(v) == dict and "value" in v else v
+        for k, v in config_.items()
+    }
+
+    rng = jax.random.PRNGKey(np.random.randint(2**31))
+    rng, _rng = jax.random.split(rng)
+    
+    # Initialize environment with batching but no rendering
+    if config["MODULE_PATH"]:
+        module_path = config["MODULE_PATH"]
+        module_name = "reward_and_state"
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module_dict = module.__dict__
+    else:
+        module_dict = None
+
+    if config["ENV_NAME"] == "Craftax-Classic-Symbolic-v1":
+        from craftax.craftax_env import make_craftax_flow_env_from_name
+        env = make_craftax_flow_env_from_name(
+            config["ENV_NAME"], not config["USE_OPTIMISTIC_RESETS"], module_dict
+        )
+        env = AutoResetEnvWrapper(env)
+        env = BatchEnvWrapper(env, num_envs=num_envs)  # Batch for parallel evaluation
+
+    env_params = env.default_params
+    obs, env_state = env.reset(_rng, env_params)
+    task_to_skill_index = jnp.array(env.task_to_skill_index)
+    num_tasks_ = len(task_to_skill_index)
+    heads, num_heads = env.heads_info
+
+    # Load model
+    print(f"Loading model for evaluation: {num_envs} parallel environments")
+    network, train_state = restore_model(policy_path, env, num_heads)
+
+    def map_player_state_to_skill(player_state):
+        player_state_one_hot = jnp.eye(num_tasks_)[player_state]
+        player_skill = (player_state_one_hot @ task_to_skill_index).astype(jnp.int32)
+        return player_skill
+
+    def step_fn(carry, x):
+        rng, obs, env_state = carry
+        rng, _rng = jax.random.split(rng)
+
+        player_state = env_state.player_state  # Already batched
+        player_skill = map_player_state_to_skill(player_state)
+
+        pi, value = network.apply(
+            train_state["params"],
+            obs,
+            player_skill,
+        )
+        action = pi.sample(seed=_rng)
+
+        rng, _rng = jax.random.split(rng)
+        new_obs, new_env_state, reward, done, info = env.step(
+            _rng, env_state, action, env_params
+        )
+
+        new_carry = (rng, new_obs, new_env_state)
+        return new_carry, new_env_state.player_state  # Return player states
+
+    # Try multiple times to achieve goal_state
+    for attempt in range(max_attempts):
+        print(f"Evaluation attempt {attempt + 1}/{max_attempts}")
+        
+        # Reset environments
+        rng, _rng = jax.random.split(rng)
+        obs, env_state = env.reset(_rng, env_params)
+        initial_carry = (rng, obs, env_state)
+        
+        # Run rollout
+        inputs = jnp.arange(max_num_frames)
+        _, player_states = jax.lax.scan(step_fn, initial_carry, inputs)
+        
+        # Check if any environment achieved goal_state
+        max_state_achieved = jnp.max(player_states)
+        print(f"  Max state achieved: {max_state_achieved} (goal: {goal_state})")
+        
+        if max_state_achieved >= goal_state:
+            print(f"SUCCESS: Goal state {goal_state} achieved in attempt {attempt + 1}")
+            return True
+    
+    print(f"FAILED: Could not achieve goal state {goal_state} in {max_attempts} attempts")
+    return False
+
+
+def gen_frames_hierarchical_old(policy_path, max_num_frames=2000, goal_state=None):
     config_path = f"{policy_path}/config.yaml"
     with open(config_path, "r") as f:
         config_ = yaml.load(f, Loader=yaml.FullLoader)
@@ -190,9 +308,12 @@ def gen_frames_hierarchical(policy_path, max_num_frames=2000, goal_state=None):
     obs, env_state = env.reset(_rng, env_params)
     task_to_skill_index = jnp.array(env.task_to_skill_index)
     num_tasks_ = len(task_to_skill_index)
+    heads, num_heads = env.heads_info
 
     # load model
-    network, train_state = restore_model(policy_path, env, num_tasks_)
+    print(f"Loading model from: {policy_path} with {num_heads=}")
+    network, train_state = restore_model(policy_path, env, num_heads)
+    print(f"Model loaded. Network: {network}, Train state keys: {list(train_state.keys()) if train_state else 'None'}")
 
     def map_player_state_to_skill(player_state):
         # Create a one-hot encoding of task_to_skill_index
@@ -238,9 +359,13 @@ def gen_frames_hierarchical(policy_path, max_num_frames=2000, goal_state=None):
 
     # Execute the scan
     max_state = 0
+    iteration = 0
     while max_state < goal_state:
+        print(f"Frame generation iteration {iteration}: max_state = {max_state}, goal_state = {goal_state}")
         _, output = jax.lax.scan(step_fn, initial_carry, inputs)
         max_state = jnp.max(output[1])  # Get the maximum player state from the output
+        iteration += 1
+        print(f"After scan: max_state = {max_state}")
 
     frames, states, new_env_states, actions = output
     return frames, states, new_env_states, actions
@@ -368,3 +493,184 @@ def evaluate_hierarchical(
     for key, value in results_dict.items():
         normed_result_dict[key] = np.sum(value) / num_episodes
     return normed_result_dict
+
+
+def gen_frames_hierarchical(policy_path, max_num_frames=2000, goal_state=None, num_envs=128):
+    """
+    Efficient frame generation: First find a successful trajectory in batch, then render it.
+    
+    Args:
+        policy_path: Path to trained policy
+        max_num_frames: Max frames per rollout
+        goal_state: Target state to achieve
+        num_envs: Number of parallel environments for finding successful trajectory
+    
+    Returns:
+        frames, states, env_states, actions for the successful trajectory
+    """
+    config_path = f"{policy_path}/config.yaml"
+    with open(config_path, "r") as f:
+        config_ = yaml.load(f, Loader=yaml.FullLoader)
+    config = {
+        k.upper(): v["value"] if type(v) == dict and "value" in v else v
+        for k, v in config_.items()
+    }
+
+    rng = jax.random.PRNGKey(np.random.randint(2**31))
+    rng, _rng = jax.random.split(rng)
+    
+    # Step 1: Set up batched environment to find successful trajectory
+    if config["MODULE_PATH"]:
+        module_path = config["MODULE_PATH"]
+        module_name = "reward_and_state"
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module_dict = module.__dict__
+    else:
+        module_dict = None
+
+    if config["ENV_NAME"] == "Craftax-Classic-Symbolic-v1":
+        from craftax.craftax_env import make_craftax_flow_env_from_name
+        
+        # Batched environment for finding successful trajectory
+        env_batch = make_craftax_flow_env_from_name(
+            config["ENV_NAME"], not config["USE_OPTIMISTIC_RESETS"], module_dict
+        )
+        env_batch = AutoResetEnvWrapper(env_batch)
+        env_batch = BatchEnvWrapper(env_batch, num_envs=num_envs)
+        
+        # Single environment for rendering
+        env_single = make_craftax_flow_env_from_name(
+            config["ENV_NAME"], not config["USE_OPTIMISTIC_RESETS"], module_dict
+        )
+        env_single = AutoResetEnvWrapper(env_single)
+
+    env_params = env_batch.default_params
+    task_to_skill_index = jnp.array(env_batch.task_to_skill_index)
+    num_tasks_ = len(task_to_skill_index)
+    heads, num_heads = env_batch.heads_info
+
+    # Load model
+    print(f"Finding successful trajectory with {num_envs} parallel environments...")
+    network, train_state = restore_model(policy_path, env_batch, num_heads)
+
+    def map_player_state_to_skill(player_state):
+        player_state_one_hot = jnp.eye(num_tasks_)[player_state]
+        player_skill = (player_state_one_hot @ task_to_skill_index).astype(jnp.int32)
+        return player_skill
+
+    def batch_step_fn(carry, x):
+        rng, obs, env_state = carry
+        rng, _rng = jax.random.split(rng)
+
+        player_state = env_state.player_state
+        player_skill = map_player_state_to_skill(player_state)
+
+        pi, value = network.apply(train_state["params"], obs, player_skill)
+        action = pi.sample(seed=_rng)
+
+        rng, _rng = jax.random.split(rng)
+        new_obs, new_env_state, reward, done, info = env_batch.step(
+            _rng, env_state, action, env_params
+        )
+
+        return (rng, new_obs, new_env_state), (new_env_state, action, _rng)
+    
+    # JIT compile the batch rollout for maximum performance
+    @jax.jit
+    def run_batch_rollout(initial_carry, inputs):
+        return jax.lax.scan(batch_step_fn, initial_carry, inputs)
+
+    # Step 2: Find a successful trajectory
+    successful_trajectory = None
+    max_attempts = 20
+    
+    for attempt in range(max_attempts):
+        print(f"Attempt {attempt + 1}/{max_attempts} to find successful trajectory...")
+        
+        rng, _rng = jax.random.split(rng)
+        obs, env_state = env_batch.reset(_rng, env_params)
+        initial_carry = (rng, obs, env_state)
+        
+        inputs = jnp.arange(max_num_frames)
+        _, (env_states, actions, rngs) = run_batch_rollout(initial_carry, inputs)
+        
+        # Check which environments achieved the goal
+        final_states = env_states.player_state[-1]  # Last timestep states
+        max_states_per_env = jnp.max(env_states.player_state, axis=0)  # Max state per environment
+        
+        successful_envs = jnp.where(max_states_per_env >= goal_state)[0]
+        
+        if len(successful_envs) > 0:
+            # Pick the first successful environment
+            success_env_idx = successful_envs[0]
+            print(f"SUCCESS: Environment {success_env_idx} achieved goal state {goal_state}")
+            
+            # Extract the successful trajectory
+            # Use jax.tree_map to extract the successful environment from the pytree
+            def extract_env(x):
+                return x[:, success_env_idx] if x.ndim > 1 else x[success_env_idx]
+            
+            successful_env_states = jax.tree_map(extract_env, env_states)
+            successful_actions = actions[:, success_env_idx]
+            
+            successful_trajectory = {
+                'env_states': successful_env_states,  # [time, ...] for successful env
+                'actions': successful_actions,        # [time]
+            }
+            break
+        else:
+            max_achieved = jnp.max(max_states_per_env)
+            print(f"  No success. Best state achieved: {max_achieved}")
+    
+    if successful_trajectory is None:
+        print(f"Failed to find successful trajectory after {max_attempts} attempts")
+        return jnp.array([]), jnp.array([]), jnp.array([]), jnp.array([])
+    
+    # Step 3: Render the successful trajectory directly (in batches to avoid OOM)
+    print("Rendering successful trajectory frames...")
+    
+    renderer = jax.jit(render_craftax_pixels, static_argnums=(1,))
+    
+    # Render each environment state directly
+    def render_state(env_state):
+        return renderer(env_state, block_pixel_size=BLOCK_PIXEL_SIZE_HUMAN)
+    
+    # JIT compile batch rendering
+    @jax.jit
+    def render_batch(env_states_batch):
+        return jax.vmap(render_state)(env_states_batch)
+    
+    # Render in smaller batches to avoid GPU memory issues
+    env_states_trajectory = successful_trajectory['env_states']
+    num_frames = len(env_states_trajectory.player_state)  # Get trajectory length
+    batch_size = 50  # Process 50 frames at a time to avoid OOM
+    
+    print(f"Rendering {num_frames} frames in batches of {batch_size}")
+    
+    frames_list = []
+    for i in range(0, num_frames, batch_size):
+        end_idx = min(i + batch_size, num_frames)
+        print(f"  Rendering frames {i} to {end_idx-1}")
+        
+        # Extract batch of environment states
+        def extract_batch(x):
+            return x[i:end_idx]
+        
+        batch_env_states = jax.tree_map(extract_batch, env_states_trajectory)
+        batch_frames = render_batch(batch_env_states)
+        # Move batch to CPU to avoid GPU memory accumulation
+        batch_frames_cpu = jax.device_get(batch_frames)
+        frames_list.append(batch_frames_cpu)
+    
+    # Concatenate all batches (now on CPU)
+    frames = np.concatenate(frames_list, axis=0)
+    
+    # Extract states and actions from successful trajectory
+    states = successful_trajectory['env_states'].player_state
+    env_states = successful_trajectory['env_states'] 
+    actions = successful_trajectory['actions']
+    
+    print(f"Generated {len(frames)} frames for successful trajectory")
+    return frames, states, env_states, actions

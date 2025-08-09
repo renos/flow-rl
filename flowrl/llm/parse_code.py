@@ -40,6 +40,7 @@ def process_generated_code(
             "player_intrinsics",
             "player_intrinsics_diff",
             "achievements",
+            "n",
         ],
         "task_reward": [
             "inventory_diff",

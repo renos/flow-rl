@@ -139,7 +139,7 @@ def make_train(config, prev_model_state=None, return_test_network=False):
             action_dim=env.action_space(env_params).n,
             layer_width=config["LAYER_SIZE"],
             num_layers=4,
-            num_tasks=num_tasks,
+            num_tasks=num_heads,
         )
         return network
 
@@ -151,7 +151,7 @@ def make_train(config, prev_model_state=None, return_test_network=False):
                 action_dim=env.action_space(env_params).n,
                 layer_width=config["LAYER_SIZE"],
                 num_layers=4,
-                num_tasks=num_tasks,
+                num_tasks=num_heads,
             )
         else:
             # network = ActorCriticConv(
@@ -444,8 +444,8 @@ def make_train(config, prev_model_state=None, return_test_network=False):
             #     ]
             # ).astype(jnp.float16)
             flat_values, _ = jax.tree_util.tree_flatten(traj_batch.inventory)
-            # Convert the flattened values to a single array
-            inventory = jnp.array(flat_values).astype(jnp.float16)
+            # Convert the flattened values to a single array by stacking them
+            inventory = jnp.stack(flat_values, axis=0).astype(jnp.float16)
             # done_point = traj_batch.done
             done_point = traj_batch.player_state == config["SUCCESS_STATE_INDEX"]
             avg_item = (
@@ -526,14 +526,22 @@ def run_ppo(config, training_state_i=2):
     config = {k.upper(): v for k, v in config.__dict__.items()}
 
     if config["USE_WANDB"]:
+        # Create unique run name including training phase info
+        training_phase = "initial" if config.get("SUCCESS_STATE_RATE", 0) < 0.1 else "final"
+        run_name = (
+            config["ENV_NAME"]
+            + "-"
+            + str(int(config["TOTAL_TIMESTEPS"] // 1e6))
+            + "M"
+            + f"-state{training_state_i}"
+            + f"-{training_phase}"
+        )
+        
         wandb.init(
             project=config["WANDB_PROJECT"],
             entity=config["WANDB_ENTITY"],
             config=config,
-            name=config["ENV_NAME"]
-            + "-"
-            + str(int(config["TOTAL_TIMESTEPS"] // 1e6))
-            + "M",
+            name=run_name,
         )
 
     rng = jax.random.PRNGKey(config["SEED"])
@@ -574,14 +582,19 @@ def run_ppo(config, training_state_i=2):
     print("SPS: ", config["TOTAL_TIMESTEPS"] / (t1 - t0))
     success_rate = float(out["info"]["reached_state"][0][training_state_i])
 
+    # Finish wandb run to separate from next training phase
+    if config["USE_WANDB"]:
+        wandb.finish()
+
     def _save_network(rs_index, dir_name):
         train_states = out["runner_state"][rs_index]
         train_state = jax.tree.map(lambda x: x[0], train_states)
         orbax_checkpointer = PyTreeCheckpointer()
         options = CheckpointManagerOptions(max_to_keep=1, create=True)
-        path = os.path.join(wandb.run.dir, dir_name)
-        checkpoint_manager = CheckpointManager(path, orbax_checkpointer, options)
-        print(f"saved runner state to {path}")
+        
+        # dir_name already contains the full path including "policies"
+        checkpoint_manager = CheckpointManager(dir_name, orbax_checkpointer, options)
+        print(f"saved runner state to {dir_name}")
         save_args = orbax_utils.save_args_from_target(train_state)
         checkpoint_manager.save(
             int(config["TOTAL_TIMESTEPS"]),

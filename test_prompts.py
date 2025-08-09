@@ -699,6 +699,162 @@ class PromptTester:
         print(f"Reuse graph nodes: {len(self.reuse_graph.nodes)}")
         print("="*40)
 
+    def test_ephemeral_inlining(self):
+        """
+        Test the ephemeral skill inlining preprocessing with the Make Wood Pickaxe example.
+        """
+        print("TESTING EPHEMERAL SKILL INLINING")
+        print("="*50)
+        
+        # Set up test skills: Collect Wood, Place Table (ephemeral), Make Wood Pickaxe
+        self.reset_db()
+        
+        # Collect Wood skill - basic skill
+        self.add_skill("Collect Wood", {
+            "skill_name": "Collect Wood",
+            "requirements": {},
+            "consumption": {},
+            "gain": {"wood": "lambda n: n"},
+            "ephemeral": False
+        })
+        
+        # Place Table skill - ephemeral skill  
+        self.add_skill("Place Table", {
+            "skill_name": "Place Table", 
+            "requirements": {},
+            "consumption": {"wood": "lambda n: 4*n"},
+            "gain": {"crafting_table_placed": "lambda n: 1"},
+            "ephemeral": True
+        })
+        
+        # Make Wood Pickaxe skill - depends on ephemeral skill
+        self.add_skill("Make Wood Pickaxe", {
+            "skill_name": "Make Wood Pickaxe",
+            "requirements": {"crafting_table_placed": "lambda _: 1"},
+            "consumption": {"wood": "lambda n: 3*n"},
+            "gain": {"wood_pickaxe": "lambda n: n"},
+            "ephemeral": False
+        })
+        
+        print("BEFORE INLINING:")
+        print("Collect Wood requirements:", self.db["skills"]["Collect Wood"]["skill_with_consumption"]["requirements"])
+        print("Collect Wood consumption:", self.db["skills"]["Collect Wood"]["skill_with_consumption"]["consumption"])
+        print("Place Table requirements:", self.db["skills"]["Place Table"]["skill_with_consumption"]["requirements"])
+        print("Place Table consumption:", self.db["skills"]["Place Table"]["skill_with_consumption"]["consumption"])
+        print("Make Wood Pickaxe requirements:", self.db["skills"]["Make Wood Pickaxe"]["skill_with_consumption"]["requirements"])
+        print("Make Wood Pickaxe consumption:", self.db["skills"]["Make Wood Pickaxe"]["skill_with_consumption"]["consumption"])
+        
+        # Test dependency resolution with ephemeral inlining
+        try:
+            execution_order = self.resolve_skill_dependencies("Make Wood Pickaxe", n=2)
+            print(f"\nExecution order: {execution_order}")
+            
+            # Expected: [('Collect Wood', 10), ('Make Wood Pickaxe', 2)]
+            # Should NOT include Place Table directly, and should collect 10 wood total
+            expected_wood = 3*2 + 4*1  # 3 wood per pickaxe * 2 pickaxes + 4 wood for 1 table = 10
+            print(f"Expected wood collection: {expected_wood}")
+            
+            # Verify the result
+            collect_wood_found = False
+            total_wood_collected = 0
+            place_table_found = False
+            
+            for skill_name, count in execution_order:
+                if skill_name == "Collect Wood":
+                    collect_wood_found = True
+                    total_wood_collected = count
+                elif skill_name == "Place Table":
+                    place_table_found = True
+                    
+            if collect_wood_found and not place_table_found:
+                print("✓ SUCCESS: Ephemeral skill properly inlined")
+                print(f"✓ Wood collection: {total_wood_collected} (expected: {expected_wood})")
+                if total_wood_collected == expected_wood:
+                    print("✓ Wood calculation correct!")
+                else:
+                    print(f"✗ Wood calculation incorrect: got {total_wood_collected}, expected {expected_wood}")
+            else:
+                print("✗ FAILED: Ephemeral skill not properly inlined")
+                print(f"  Collect Wood found: {collect_wood_found}")
+                print(f"  Place Table found: {place_table_found}")
+                
+        except Exception as e:
+            print(f"Error during dependency resolution: {e}")
+            import traceback
+            traceback.print_exc()
+            
+        return execution_order
+            
+    def test_trajectory_analysis(self, example_trajectory, skill_data, knowledge_base=None):
+        """
+        Test trajectory analysis functionality to propose database updates.
+        
+        Args:
+            example_trajectory: List of trajectory strings, e.g., ['Timestep 12: Action: DO, Gained 1 wood']
+            skill_data: Dictionary with skill information including skill_with_consumption
+            knowledge_base: Optional knowledge base dict, will load default if None
+            
+        Returns:
+            Dictionary with proposed updates for both skill and knowledge base
+        """
+        print("TESTING TRAJECTORY ANALYSIS")
+        print("="*50)
+        
+        # Load knowledge base if not provided
+        if knowledge_base is None:
+            from pathlib import Path
+            import json
+            kb_file = Path("resources/craftax_classic_knowledgebase_verified.json")
+            if kb_file.exists():
+                with open(kb_file, 'r') as f:
+                    knowledge_base = json.load(f)
+                print(f"Loaded knowledge base with {len(knowledge_base)} entries")
+            else:
+                print("Warning: Could not load knowledge base")
+                knowledge_base = {}
+        
+        # Set up database for trajectory analysis
+        self.db["example_trajectory"] = example_trajectory
+        self.db["current"]["skill_with_consumption"] = skill_data.get("skill_with_consumption", {})
+        self.db["knowledge_base"] = knowledge_base
+        
+        print(f"Current skill: {skill_data.get('skill_with_consumption', {}).get('skill_name', 'Unknown')}")
+        print(f"Trajectory: {example_trajectory}")
+        
+        # Run the inventory graph analysis
+        try:
+            results = self.inventory_graph.evaluate()
+            
+            print("\n=== TRAJECTORY ANALYSIS RESULTS ===")
+            
+            # Extract skill updates
+            if "skill_update_results" in self.db["current"]:
+                skill_updates = self.db["current"]["skill_update_results"]
+                print("\n1. SKILL UPDATES:")
+                print(f"   Updated requirements: {skill_updates.get('updated_requirements', {})}")
+                print(f"   Updated gain: {skill_updates.get('updated_gain', {})}")
+                
+            # Extract knowledge base updates applied
+            if "kb_updates_applied" in self.db["current"]:
+                kb_updates = self.db["current"]["kb_updates_applied"]
+                print("\n2. KNOWLEDGE BASE UPDATES APPLIED:")
+                for i, update in enumerate(kb_updates):
+                    print(f"   Update {i+1}:")
+                    print(f"     Path: {' -> '.join(update.get('path', []))}")
+                    print(f"     Old: {update.get('old_requirements', [])}")
+                    print(f"     New: {update.get('new_requirements', [])}")
+                    print(f"     Reason: {update.get('reason', '')}")
+            
+            return {
+                "skill_updates": self.db["current"].get("skill_update_results", {}),
+                "kb_updates_applied": self.db["current"].get("kb_updates_applied", []),
+                "raw_results": results
+            }
+            
+        except Exception as e:
+            print(f"Error during trajectory analysis: {e}")
+            return {"error": str(e)}
+
 
 # Convenience functions for Jupyter notebook usage
 def create_tester():
@@ -721,6 +877,29 @@ def quick_test_full_pipeline(tester=None):
         tester = create_tester()
         
     return tester.test_full_pipeline()
+
+def test_trajectory_analysis_example(tester=None):
+    """Test trajectory analysis with example data."""
+    if tester is None:
+        tester = create_tester()
+    
+    # Example trajectory and skill data
+    example_trajectory = ['Timestep 12: Action: DO, Gained 1 wood']
+    example_skill_data = {
+        "skill_name": "Collect Wood",
+        "skill_with_consumption": {
+            "skill_name": "Collect Wood",
+            "requirements": {},
+            "gain": {"wood": "lambda n: n"},
+            "ephemeral": False
+        }
+    }
+    
+    print("Testing with example trajectory and skill data:")
+    print(f"Trajectory: {example_trajectory}")
+    print(f"Skill: {example_skill_data['skill_with_consumption']['skill_name']}")
+    
+    return tester.test_trajectory_analysis(example_trajectory, example_skill_data)
 
 
 # Example usage for Jupyter notebook:
@@ -746,6 +925,21 @@ pipeline_results = tester.test_full_pipeline()
 # Test individual workflows
 inventory_results = tester.test_inventory_workflow()
 reuse_results = tester.test_reuse_workflow()
+
+# Test trajectory analysis
+trajectory_results = test_trajectory_analysis_example()
+
+# Test trajectory analysis with custom data
+custom_trajectory = ['Timestep 5: Action: MINE_TREE, Gained 2 wood', 'Timestep 6: Action: DO, Lost 1 wood']
+custom_skill = {
+    "skill_with_consumption": {
+        "skill_name": "Make Table",
+        "requirements": {"wood": "lambda n: 2*n"},
+        "gain": {},
+        "ephemeral": True
+    }
+}
+custom_results = tester.test_trajectory_analysis(custom_trajectory, custom_skill)
 
 # Test single inventory prompts
 tester.test_single_inventory_prompt("predict_item_count")

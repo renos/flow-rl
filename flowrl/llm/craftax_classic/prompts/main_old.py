@@ -408,7 +408,7 @@ class Achievement(Enum):
 
 #Here are example docstrings:
 
-def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev, player_intrinsics, player_intrinsics_diff, achievements):
+def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev, player_intrinsics, player_intrinsics_diff, achievements, n):
     \"\"\"
     Determines whether Task `$db.current.subtask_name$` is complete.
     Do not call external functions or make any assumptions beyond the information given to you.
