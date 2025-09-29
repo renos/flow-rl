@@ -97,6 +97,45 @@ class PromptTester:
         }
         self.db["skills"][skill_name] = skill_entry
         print(f"Added skill: {skill_name}")
+    
+    def load_skills_from_json(self, json_file_path):
+        """
+        Load all skills from a JSON file in the format used by the training runs.
+        
+        Args:
+            json_file_path: Path to the skills.json file
+        """
+        import json
+        from pathlib import Path
+        
+        json_path = Path(json_file_path)
+        if not json_path.exists():
+            raise FileNotFoundError(f"Skills file not found: {json_file_path}")
+        
+        print(f"Loading skills from: {json_file_path}")
+        
+        with open(json_path, 'r') as f:
+            skills_data = json.load(f)
+        
+        # Extract skills from the "data" key
+        if "data" not in skills_data:
+            raise ValueError("Expected 'data' key in skills JSON file")
+        
+        skills = skills_data["data"]
+        
+        # Clear existing skills first
+        self.db["skills"].clear()
+        
+        # Add each skill to the database
+        skills_added = 0
+        for skill_name, skill_info in skills.items():
+            # The skill_info already has the correct format with skill_with_consumption
+            self.db["skills"][skill_name] = skill_info
+            skills_added += 1
+            print(f"  Added: {skill_name}")
+        
+        print(f"Successfully loaded {skills_added} skills from {json_path.name}")
+        return skills_added
         
     def remove_skill(self, skill_name):
         """
@@ -558,6 +597,87 @@ class PromptTester:
         execution_order = resolver.resolve_dependencies(skill_name, n)
         
         return execution_order
+    
+    def write_execution_order_to_file(self, execution_order, output_path, module_name=None):
+        """
+        Write the execution order to a Python module file for use in training.
+        
+        Args:
+            execution_order: List of (skill_name, count) tuples from resolve_skill_dependencies
+            output_path: Path where to write the Python module file
+            module_name: Optional base name for the module (defaults to filename without extension)
+        """
+        from pathlib import Path
+        import os
+        from flowrl.llm.craftax_classic.generate_code import generate_validated_py
+        
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        if module_name is None:
+            module_name = output_path.stem
+            
+        print(f"Writing {len(execution_order)} execution steps to {output_path}")
+        
+        # Clear the file first
+        if output_path.exists():
+            output_path.unlink()
+        
+        # Generate the module file with one node per execution step
+        skills_written = 0
+        for task_index, (skill_name, count) in enumerate(execution_order):
+            if skill_name in self.db["skills"]:
+                skill_data = self.db["skills"][skill_name]
+                functions = skill_data.get("functions", [])
+                
+                if len(functions) >= 3:
+                    # generate_validated_py expects exactly 3 functions: [task_is_done, task_reward, task_network_number]
+                    generate_validated_py(functions[:3], str(output_path), task_index, n=count)
+                    print(f"  Added task_{task_index}: {skill_name} (n={count})")
+                    skills_written += 1
+                else:
+                    print(f"  Warning: Skill '{skill_name}' has {len(functions)} functions, expected 3 - skipping")
+            else:
+                print(f"  Warning: Skill '{skill_name}' not found in skills database - skipping")
+        
+        print(f"Successfully wrote {skills_written}/{len(execution_order)} tasks to {output_path}")
+        return skills_written
+    
+    def create_full_module(self, skill_name, n=1, output_path=None, max_inventory_capacity=9):
+        """
+        Complete workflow: resolve dependencies and write to module file.
+        
+        Args:
+            skill_name: Target skill to resolve dependencies for
+            n: Number of times to apply this skill
+            output_path: Path to write the module file (defaults to ./{skill_name.lower().replace(' ', '_')}.py)
+            max_inventory_capacity: Maximum inventory capacity per item
+            
+        Returns:
+            Tuple of (execution_order, skills_written_count)
+        """
+        from pathlib import Path
+        
+        # Resolve dependencies
+        execution_order = self.resolve_skill_dependencies(skill_name, n, max_inventory_capacity)
+        
+        # Default output path if not provided
+        if output_path is None:
+            safe_name = skill_name.lower().replace(' ', '_').replace('-', '_')
+            output_path = Path(f"{safe_name}_n{n}.py")
+        else:
+            output_path = Path(output_path)
+            
+        # Write to file
+        skills_written = self.write_execution_order_to_file(execution_order, output_path)
+        
+        print(f"\n=== MODULE CREATION COMPLETE ===")
+        print(f"Target skill: {skill_name} (n={n})")
+        print(f"Execution steps: {len(execution_order)}")
+        print(f"Skills with code written: {skills_written}")
+        print(f"Output file: {output_path.absolute()}")
+        
+        return execution_order, skills_written
         
     def test_reuse_workflow(self):
         """Test the skill reuse workflow."""

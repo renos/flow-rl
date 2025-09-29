@@ -89,7 +89,11 @@ def make_train(config, prev_model_state=None, return_test_network=False):
     )
     env_params = env.default_params
 
+    # Update env_params with intrinsics_reward setting
+    env_params = env_params.replace(intrinsics_reward=config["INTRINSICS_REWARD"])
+
     heads, num_heads = env.heads_info
+
     heads = list(heads)
     task_to_skill_index = jnp.array(env.task_to_skill_index)
     num_tasks_ = len(task_to_skill_index)
@@ -395,9 +399,9 @@ def make_train(config, prev_model_state=None, return_test_network=False):
                     mask_seen = jnp.logical_and(
                         x[:, :, :, 0, :] < 30, x[:, :, :, 1, :] < 30
                     )
-                    return (mask_seen * reached_ep[:, :, None, None]).sum(
+                    return (mask_seen * returned_episode[:, :, None, None]).sum(
                         axis=(0, 1)
-                    ) / reached_ep.sum()
+                    ) / returned_episode.sum()
                 elif is_special:
                     # Reshape returned_episode to match the dimensions of x for broadcasting
                     # also we want returned episode to track the success rates directly
@@ -405,7 +409,7 @@ def make_train(config, prev_model_state=None, return_test_network=False):
                         axis=(0, 1)
                     ) / returned_episode.sum()
                 else:
-                    return (x * reached_ep).sum() / reached_ep.sum()
+                    return (x * returned_episode).sum() / returned_episode.sum()
 
             metric = {
                 key: process(
@@ -425,6 +429,41 @@ def make_train(config, prev_model_state=None, return_test_network=False):
             total_weights = traj_batch.info["returned_episode"].sum()
             state_rates = state_occurrences / total_weights
             metric["state_rates"] = state_rates
+            
+            # Calculate transition success rate: b/(a+b) where
+            # a = transitions from (goal_state-1) to 0 (failure)
+            # b = transitions from (goal_state-1) to goal_state (success)
+            goal_state = config["SUCCESS_STATE_INDEX"]
+            penultimate_state = goal_state - 1
+            
+            # Find transitions from penultimate state
+            current_states = traj_batch.player_state[:-1]  # All states except last
+            next_states = traj_batch.player_state[1:]      # All states except first
+            episode_mask = traj_batch.info["returned_episode"][1:]  # Only count completed episodes
+            
+            # Count transitions from penultimate_state to 0 (failure)
+            failure_transitions = jnp.logical_and(
+                jnp.logical_and(current_states == penultimate_state, next_states == 0),
+                episode_mask > 0  # Only count in completed episodes
+            ).sum()
+            
+            # Count transitions from penultimate_state to goal_state (success)  
+            success_transitions = jnp.logical_and(
+                jnp.logical_and(current_states == penultimate_state, next_states == goal_state),
+                episode_mask > 0  # Only count in completed episodes
+            ).sum()
+            
+            # Calculate success rate: b/(a+b), handle division by zero
+            total_transitions = failure_transitions + success_transitions
+            transition_success_rate = jnp.where(
+                total_transitions > 0,
+                success_transitions / total_transitions,
+                0.0
+            )
+            
+            metric["transition_success_rate"] = transition_success_rate
+            metric["failure_transitions"] = failure_transitions
+            metric["success_transitions"] = success_transitions
 
             # inventory when done
             # inventory = jnp.array(
@@ -443,9 +482,34 @@ def make_train(config, prev_model_state=None, return_test_network=False):
             #         traj_batch.inventory.iron_sword,
             #     ]
             # ).astype(jnp.float16)
-            flat_values, _ = jax.tree_util.tree_flatten(traj_batch.inventory)
-            # Convert the flattened values to a single array by stacking them
-            inventory = jnp.stack(flat_values, axis=0).astype(jnp.float16)
+            # Handle inventory differently for Craftax Classic vs full Craftax vs Fabrax
+            if "Classic" in config["ENV_NAME"] or "Fabrax" in config["ENV_NAME"]:
+                # Craftax Classic & Fabrax: all inventory fields are scalars, can use tree_flatten
+                flat_values, _ = jax.tree_util.tree_flatten(traj_batch.inventory)
+                inventory = jnp.stack(flat_values, axis=0).astype(jnp.float16)
+            else:
+                # Full Craftax: has array fields (armour, potions), handle separately
+                scalar_inventory = jnp.stack([
+                    traj_batch.inventory.wood,
+                    traj_batch.inventory.stone,
+                    traj_batch.inventory.coal,
+                    traj_batch.inventory.iron,
+                    traj_batch.inventory.diamond,
+                    traj_batch.inventory.sapling,
+                    traj_batch.inventory.pickaxe,
+                    traj_batch.inventory.sword,
+                    traj_batch.inventory.bow,
+                    traj_batch.inventory.arrows,
+                    traj_batch.inventory.torches,
+                    traj_batch.inventory.ruby,
+                    traj_batch.inventory.sapphire,
+                    traj_batch.inventory.books,
+                ], axis=0).astype(jnp.float16)
+
+                # Stack array fields along the first axis to match scalar_inventory shape
+                armour_stacked = jnp.moveaxis(traj_batch.inventory.armour, -1, 0).astype(jnp.float16)
+                potions_stacked = jnp.moveaxis(traj_batch.inventory.potions, -1, 0).astype(jnp.float16)
+                inventory = jnp.concatenate([scalar_inventory, armour_stacked, potions_stacked], axis=0)
             # done_point = traj_batch.done
             done_point = traj_batch.player_state == config["SUCCESS_STATE_INDEX"]
             avg_item = (
@@ -522,8 +586,10 @@ def make_train(config, prev_model_state=None, return_test_network=False):
     return train
 
 
-def run_ppo(config, training_state_i=2):
+def run_ppo(config, training_state_i=None):
     config = {k.upper(): v for k, v in config.__dict__.items()}
+    if training_state_i is None:
+        training_state_i = config["SUCCESS_STATE"]
 
     if config["USE_WANDB"]:
         # Create unique run name including training phase info
@@ -636,7 +702,7 @@ if __name__ == "__main__":
     parser.add_argument("--update_epochs", type=int, default=4)
     parser.add_argument("--num_minibatches", type=int, default=8)
     parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--gae_lambda", type=float, default=0.8)
+    parser.add_argument("--gae_lambda", type=float, default=0.95)
     parser.add_argument("--clip_eps", type=float, default=0.2)
     parser.add_argument("--ent_coef", type=float, default=0.01)
     parser.add_argument("--vf_coef", type=float, default=0.5)
@@ -682,6 +748,9 @@ if __name__ == "__main__":
     )
     # what sucdess rate to achieve before optimizing next node
     parser.add_argument("--success_state_rate", type=float, default=0.8)
+
+    parser.add_argument("--success_state", type=int)
+    parser.add_argument("--intrinsics-reward", action="store_true", help="Add intrinsics (hunger/thirst/fatigue) to reward")
 
     args, rest_args = parser.parse_known_args(sys.argv[1:])
     if rest_args:

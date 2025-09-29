@@ -35,4 +35,5 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-where=["flowrl"]
+where = ["."]
+include = ["flowrl*"]
