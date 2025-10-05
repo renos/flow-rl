@@ -686,3 +686,117 @@ class ActorCriticMoE(nn.Module):
         pi = distrax.Categorical(logits=selected_actor_outputs)
 
         return pi, selected_critic_outputs
+
+from typing import Callable
+import jax
+import jax.numpy as jnp
+from flax import linen as nn
+from flax.linen.initializers import lecun_normal, he_normal, normal, constant
+import distrax
+
+class DensePerTaskNoIndex(nn.Module):
+    features: int
+    num_tasks: int
+    # Branch-free initializers
+    kernel_init: Callable = lecun_normal()  # good default for linear layers
+    bias_init:   Callable = constant(0.0)
+
+    @nn.compact
+    def __call__(self, x: jnp.ndarray, task_ids: jnp.ndarray) -> jnp.ndarray:
+        """x: [B, I], task_ids: [B] (ints)"""
+        # Params have a leading task axis; rely on x.shape[-1] for in_features.
+        # If this runs during init (outside jit), shapes are concrete.
+        # If it *accidentally* runs under jit, lecun_normal doesn't branch on shape.
+        kernel = self.param(
+            "kernel", self.kernel_init, (self.num_tasks, x.shape[-1], self.features)
+        )
+        bias = self.param(
+            "bias", self.bias_init, (self.num_tasks, self.features)
+        )
+
+        # One-hot gate (no indexing)
+        gate = jax.nn.one_hot(task_ids, self.num_tasks, dtype=x.dtype)  # [B, T]
+
+        # y[b,o] = sum_t gate[b,t] * sum_i x[b,i] * kernel[t,i,o] + gate[b,t]*bias[t,o]
+        y = jnp.einsum("bt,bi,tio->bo", gate, x, kernel)
+        y = y + jnp.einsum("bt,to->bo", gate, bias)
+        return y
+
+
+class MLPPerTaskNoIndex(nn.Module):
+    hidden_width: int
+    num_layers: int               # >= 1
+    num_tasks: int
+    out_features: int
+    activation: str = "tanh"
+
+    # Hidden: He/LeCun are fine; pick based on activation
+    kernel_init_hidden: Callable = he_normal()     # good for ReLU; LeCun for tanh
+    kernel_init_out:    Callable = normal(0.01)    # small logits / value head
+    bias_init:          Callable = constant(0.0)
+
+    @nn.compact
+    def __call__(self, x: jnp.ndarray, task_ids: jnp.ndarray) -> jnp.ndarray:
+        act = nn.relu if self.activation == "relu" else nn.tanh
+        hidden_init = he_normal() if self.activation == "relu" else lecun_normal()
+
+        # First (or only) layer
+        h = DensePerTaskNoIndex(
+            features=self.hidden_width,
+            num_tasks=self.num_tasks,
+            kernel_init=hidden_init,
+            bias_init=self.bias_init,
+        )(x, task_ids)
+        h = act(h)
+
+        # Middle hidden layers (if any)
+        for _ in range(self.num_layers - 2):
+            h = DensePerTaskNoIndex(
+                features=self.hidden_width,
+                num_tasks=self.num_tasks,
+                kernel_init=hidden_init,
+                bias_init=self.bias_init,
+            )(h, task_ids)
+            h = act(h)
+
+        # Output layer
+        y = DensePerTaskNoIndex(
+            features=self.out_features,
+            num_tasks=self.num_tasks,
+            kernel_init=self.kernel_init_out,
+            bias_init=self.bias_init,
+        )(h if self.num_layers > 1 else x, task_ids)
+        return y
+
+
+class ActorCriticMoE_single(nn.Module):
+    action_dim: int
+    layer_width: int
+    num_layers: int   # >= 1
+    num_tasks: int
+    activation: str = "tanh"
+
+    @nn.compact
+    def __call__(self, x: jnp.ndarray, task_ids: jnp.ndarray):
+        # Actor (small output scale for logits)
+        actor_logits = MLPPerTaskNoIndex(
+            hidden_width=self.layer_width,
+            num_layers=self.num_layers,
+            num_tasks=self.num_tasks,
+            out_features=self.action_dim,
+            activation=self.activation,
+            kernel_init_out=normal(0.01),   # small for logits
+        )(x, task_ids)
+
+        # Critic (slightly larger OK)
+        value = MLPPerTaskNoIndex(
+            hidden_width=self.layer_width,
+            num_layers=self.num_layers,
+            num_tasks=self.num_tasks,
+            out_features=1,
+            activation=self.activation,
+            kernel_init_out=lecun_normal(),
+        )(x, task_ids).squeeze(-1)
+
+        pi = distrax.Categorical(logits=actor_logits)
+        return pi, value

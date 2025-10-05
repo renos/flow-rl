@@ -97,6 +97,24 @@ if __name__ == "__main__":
     parser.add_argument(
         "--trajectory_analysis", action=argparse.BooleanOptionalAction, default=True
     )
+    parser.add_argument(
+        "--skip_training",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Skip PPO training and directly evaluate existing policies (debug mode)",
+    )
+    parser.add_argument(
+        "--frame_gen_envs",
+        type=int,
+        default=32,
+        help="Number of parallel environments when searching for a successful trajectory",
+    )
+    parser.add_argument(
+        "--frame_gen_max_frames",
+        type=int,
+        default=1000,
+        help="Maximum frames per rollout while generating trajectory visualisations",
+    )
 
     args, rest_args = parser.parse_known_args(sys.argv[1:])
 
@@ -159,7 +177,12 @@ if __name__ == "__main__":
             args.success_state_rate = 0.05
         else:
             args.success_state_rate = 0.8
-        out, success = run_ppo(args, training_state_i=len(flow_graph.execution_order))
+        if args.skip_training:
+            print("\n[debug] Skipping PPO training; using existing policy artefacts for evaluation")
+            out = None
+            success = True
+        else:
+            out, success = run_ppo(args, training_state_i=len(flow_graph.execution_order))
 
         if not success:
             print(
@@ -181,11 +204,12 @@ if __name__ == "__main__":
             policy_path=Path(args.graph_path)
             / str(flow_graph.current_i)
             / f"{flow_graph.current_i}_policies",
-            max_num_frames=2000,
+            max_num_frames=args.frame_gen_max_frames,
             goal_state=len(flow_graph.execution_order),
+            num_envs=args.frame_gen_envs,
         )
 
-        if args.trajectory_analysis:
+        if args.trajectory_analysis and not args.skip_training:
             # Analyze trajectory and update knowledge base
             flow_graph.explain_trajectory(
                 env_states, actions, len(flow_graph.execution_order) - 1
@@ -219,20 +243,23 @@ if __name__ == "__main__":
                 flow_graph.restore_checkpoint(checkpoint_name)
                 continue
 
-        flow_graph.update_db(out, skill_name, skill_data)
+        if out is not None and not args.skip_training:
+            flow_graph.update_db(out, skill_name, skill_data)
 
-        # Create and save successful checkpoint to disk, then clean up
-        success_checkpoint_name = (
-            f"successful_skill_{flow_graph.current_i}_{skill_name}"
-        )
-        flow_graph.create_checkpoint(success_checkpoint_name)
-        flow_graph.save_checkpoint_to_disk(success_checkpoint_name)
-        flow_graph.cleanup_checkpoint(
-            success_checkpoint_name
-        )  # Remove from memory after saving to disk
-        flow_graph.cleanup_checkpoint(
-            checkpoint_name
-        )  # Clean up the original checkpoint
+            # Create and save successful checkpoint to disk, then clean up
+            success_checkpoint_name = (
+                f"successful_skill_{flow_graph.current_i}_{skill_name}"
+            )
+            flow_graph.create_checkpoint(success_checkpoint_name)
+            flow_graph.save_checkpoint_to_disk(success_checkpoint_name)
+            flow_graph.cleanup_checkpoint(
+                success_checkpoint_name
+            )  # Remove from memory after saving to disk
+            flow_graph.cleanup_checkpoint(
+                checkpoint_name
+            )  # Clean up the original checkpoint
+        elif args.skip_training:
+            print("[debug] Skipping DB + checkpoint updates (skip_training enabled)")
 
         # Save video and advance to next iteration
         video_path = Path(args.graph_path) / str(flow_graph.current_i) / "video.mp4"

@@ -3,3 +3,14 @@ exp/
 *.pyc
 wandb/
 *.egg-info
+node_modules/*
+paper_plots/*
+*.pbz2
+results/*
+*.tex
+Flow_RL_Paper/*
+achievement_videos/*
+achievement_flowcharts/*
+.vscode/*
+.DS_Store
+AGENTS.md

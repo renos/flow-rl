@@ -25,9 +25,10 @@ from flowrl.wrappers import (
     BatchEnvWrapper,
     AutoResetEnvWrapper,
 )
+from craftax.craftax_env import make_craftax_flow_env_from_name
 from typing import NamedTuple
 import jax.numpy as jnp
-from logz.batch_logging import batch_log, create_log_dict
+from flowrl.logz.batch_logging import batch_log, create_log_dict
 from collections import defaultdict
 
 import importlib
@@ -143,11 +144,21 @@ from craftax.craftax_classic.constants import (
     INVENTORY_OBS_HEIGHT,
     Action,
     Achievement,
-    BLOCK_PIXEL_SIZE_HUMAN,
+    BLOCK_PIXEL_SIZE_HUMAN as CLASSIC_BLOCK_PIXEL_SIZE,
+)
+from craftax.craftax.constants import (
+    BLOCK_PIXEL_SIZE_HUMAN as CRAFTAX_BLOCK_PIXEL_SIZE,
+)
+from craftax.fabrax.constants import (
+    BLOCK_PIXEL_SIZE_HUMAN as FABRAX_BLOCK_PIXEL_SIZE,
 )
 from flowrl.wrappers import AutoResetEnvWrapper
 
-from craftax.craftax_classic.renderer import render_craftax_pixels
+from craftax.craftax_classic.renderer import (
+    render_craftax_pixels as render_classic_pixels,
+)
+from craftax.craftax.renderer import render_craftax_pixels as render_craftax_pixels
+from craftax.fabrax.renderer import render_craftax_pixels as render_fabrax_pixels
 import numpy as np
 
 
@@ -321,7 +332,7 @@ def gen_frames_hierarchical_old(policy_path, max_num_frames=2000, goal_state=Non
         player_skill = (player_state_one_hot @ task_to_skill_index).astype(jnp.int32)
         return player_skill
 
-    renderer = jax.jit(render_craftax_pixels, static_argnums=(1,))
+    renderer = _make_renderer(config["ENV_NAME"])
 
     def step_fn(carry, x):
         rng, obs, env_state, i, continue_loop = carry
@@ -344,7 +355,7 @@ def gen_frames_hierarchical_old(policy_path, max_num_frames=2000, goal_state=Non
             _rng, env_state, action, env_params
         )
 
-        frame = renderer(new_env_state, block_pixel_size=BLOCK_PIXEL_SIZE_HUMAN)
+        frame = renderer(new_env_state)
         output = (frame, new_env_state.player_state, new_env_state, action)
 
         new_carry = (rng, new_obs, new_env_state, i + 1, continue_loop)
@@ -530,21 +541,18 @@ def gen_frames_hierarchical(policy_path, max_num_frames=2000, goal_state=None, n
     else:
         module_dict = None
 
-    if config["ENV_NAME"] == "Craftax-Classic-Symbolic-v1":
-        from craftax.craftax_env import make_craftax_flow_env_from_name
-        
-        # Batched environment for finding successful trajectory
-        env_batch = make_craftax_flow_env_from_name(
-            config["ENV_NAME"], not config["USE_OPTIMISTIC_RESETS"], module_dict
-        )
-        env_batch = AutoResetEnvWrapper(env_batch)
-        env_batch = BatchEnvWrapper(env_batch, num_envs=num_envs)
-        
-        # Single environment for rendering
-        env_single = make_craftax_flow_env_from_name(
-            config["ENV_NAME"], not config["USE_OPTIMISTIC_RESETS"], module_dict
-        )
-        env_single = AutoResetEnvWrapper(env_single)
+    # Batched environment for finding successful trajectory
+    env_batch = make_craftax_flow_env_from_name(
+        config["ENV_NAME"], not config["USE_OPTIMISTIC_RESETS"], module_dict
+    )
+    env_batch = AutoResetEnvWrapper(env_batch)
+    env_batch = BatchEnvWrapper(env_batch, num_envs=num_envs)
+
+    # Single environment for rendering / evaluation
+    env_single = make_craftax_flow_env_from_name(
+        config["ENV_NAME"], not config["USE_OPTIMISTIC_RESETS"], module_dict
+    )
+    env_single = AutoResetEnvWrapper(env_single)
 
     env_params = env_batch.default_params
     task_to_skill_index = jnp.array(env_batch.task_to_skill_index)
@@ -631,11 +639,11 @@ def gen_frames_hierarchical(policy_path, max_num_frames=2000, goal_state=None, n
     # Step 3: Render the successful trajectory directly (in batches to avoid OOM)
     print("Rendering successful trajectory frames...")
     
-    renderer = jax.jit(render_craftax_pixels, static_argnums=(1,))
+    renderer = _make_renderer(config["ENV_NAME"])
     
     # Render each environment state directly
     def render_state(env_state):
-        return renderer(env_state, block_pixel_size=BLOCK_PIXEL_SIZE_HUMAN)
+        return renderer(env_state)
     
     # JIT compile batch rendering
     @jax.jit
@@ -674,3 +682,16 @@ def gen_frames_hierarchical(policy_path, max_num_frames=2000, goal_state=None, n
     
     print(f"Generated {len(frames)} frames for successful trajectory")
     return frames, states, env_states, actions
+def _make_renderer(env_name: str):
+    """Return a JIT-compiled renderer matching the environment family."""
+    if "Classic" in env_name:
+        block_pixel_size = CLASSIC_BLOCK_PIXEL_SIZE
+        base_renderer = render_classic_pixels
+    elif "Fabrax" in env_name:
+        block_pixel_size = FABRAX_BLOCK_PIXEL_SIZE
+        base_renderer = render_fabrax_pixels
+    else:
+        block_pixel_size = CRAFTAX_BLOCK_PIXEL_SIZE
+        base_renderer = render_craftax_pixels
+
+    return jax.jit(lambda env_state: base_renderer(env_state, block_pixel_size=block_pixel_size))

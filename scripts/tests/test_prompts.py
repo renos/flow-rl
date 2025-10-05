@@ -13,6 +13,7 @@ sys.path.append(str(Path(__file__).parent))
 from flowrl.llm.craftax_classic.llm import generate_graph
 from flowrl.llm.craftax_classic.generate_code import validate_code, create_inventory_from_array
 from flowrl.skill_dependency_resolver import SkillDependencyResolver
+from flowrl.skill_depenency_resolver_new import SymbolicSkillDependencyResolver
 import numpy as np
 import json
 
@@ -574,30 +575,68 @@ class PromptTester:
                 
         return dependencies
     
-    def resolve_skill_dependencies(self, skill_name, n=1, max_inventory_capacity=9):
-        """
-        Resolve dependencies for a skill and return the execution order.
-        
+    def resolve_skill_dependencies(
+        self,
+        skill_name,
+        n=1,
+        max_inventory_capacity=9,
+        use_symbolic_state=False,
+        initial_symbolic_state=None,
+    ):
+        """Resolve dependencies for a skill and return the execution order.
+
         Args:
             skill_name: Name of the skill to resolve dependencies for
             n: Number of times to apply this skill (default: 1)
             max_inventory_capacity: Maximum inventory capacity per item (default: 9)
-            
+            use_symbolic_state: When True, plan over the richer symbolic state representation
+            initial_symbolic_state: Optional `SymbolicState` to seed the symbolic resolver
+
         Returns:
             List of nodes/skills in execution order to fulfill the target skill
         """
         if skill_name not in self.db["skills"]:
             available_skills = list(self.db["skills"].keys())
             raise ValueError(f"Skill '{skill_name}' not found. Available skills: {available_skills}")
-        
-        # Create resolver with current skills and inventory capacity
-        resolver = SkillDependencyResolver(self.db["skills"], max_inventory_capacity)
-        
-        print(f"Resolving dependencies for '{skill_name}' with n={n}, max_inventory={max_inventory_capacity}")
-        execution_order = resolver.resolve_dependencies(skill_name, n)
-        
+
+        print(
+            f"Resolving dependencies for '{skill_name}' with n={n}, max_inventory={max_inventory_capacity}, "
+            f"symbolic={use_symbolic_state}"
+        )
+
+        if use_symbolic_state:
+            resolver = SymbolicSkillDependencyResolver(
+                self.db["skills"],
+                max_inventory_capacity,
+                initial_state=initial_symbolic_state,
+            )
+            execution_order = resolver.resolve_dependencies(
+                skill_name, n, initial_state=initial_symbolic_state
+            )
+        else:
+            resolver = SkillDependencyResolver(
+                self.db["skills"], max_inventory_capacity
+            )
+            execution_order = resolver.resolve_dependencies(skill_name, n)
+
         return execution_order
-    
+
+    def resolve_skill_dependencies_symbolic(
+        self,
+        skill_name,
+        n=1,
+        max_inventory_capacity=9,
+        initial_symbolic_state=None,
+    ):
+        """Convenience wrapper that forces symbolic-state planning."""
+        return self.resolve_skill_dependencies(
+            skill_name,
+            n,
+            max_inventory_capacity,
+            use_symbolic_state=True,
+            initial_symbolic_state=initial_symbolic_state,
+        )
+
     def write_execution_order_to_file(self, execution_order, output_path, module_name=None):
         """
         Write the execution order to a Python module file for use in training.
@@ -643,40 +682,91 @@ class PromptTester:
         print(f"Successfully wrote {skills_written}/{len(execution_order)} tasks to {output_path}")
         return skills_written
     
-    def create_full_module(self, skill_name, n=1, output_path=None, max_inventory_capacity=9):
+    def test_frontier_calculation(self, max_inventory_capacity=9):
+        """
+        Run the frontier calculation on loaded skills and time it.
+
+        Args:
+            max_inventory_capacity: Maximum inventory capacity for the environment
+
+        Returns:
+            Tuple of (frontier_summary, elapsed_time_seconds)
+        """
+        import time
+        from flowrl.llm.craftax.symbolic_state import compute_frontier_summary
+
+        print(f"\n=== FRONTIER CALCULATION TEST ===")
+        print(f"Number of skills: {len(self.db['skills'])}")
+        print(f"Max inventory capacity: {max_inventory_capacity}")
+        print(f"Starting frontier calculation...")
+
+        start_time = time.time()
+        frontier_summary = compute_frontier_summary(self.db["skills"], max_inventory_capacity)
+        elapsed_time = time.time() - start_time
+
+        print(f"✓ Frontier calculation completed in {elapsed_time:.3f} seconds")
+        print(f"\n=== FRONTIER SUMMARY ===")
+        print(frontier_summary)
+        print(f"=== END FRONTIER SUMMARY ===\n")
+
+        return frontier_summary, elapsed_time
+
+    def create_full_module(
+        self,
+        skill_name,
+        n=1,
+        output_path=None,
+        max_inventory_capacity=9,
+        use_symbolic_state=False,
+        initial_symbolic_state=None,
+        test_frontier=False,
+    ):
         """
         Complete workflow: resolve dependencies and write to module file.
-        
+
         Args:
             skill_name: Target skill to resolve dependencies for
             n: Number of times to apply this skill
             output_path: Path to write the module file (defaults to ./{skill_name.lower().replace(' ', '_')}.py)
             max_inventory_capacity: Maximum inventory capacity per item
-            
+            use_symbolic_state: When True, execute dependency planning with SymbolicState resolver
+            initial_symbolic_state: Optional symbolic state override for planning context
+            test_frontier: When True, also run frontier calculation and time it
+
         Returns:
             Tuple of (execution_order, skills_written_count)
         """
         from pathlib import Path
-        
+
+        # Optionally test frontier calculation
+        if test_frontier:
+            self.test_frontier_calculation(max_inventory_capacity)
+
         # Resolve dependencies
-        execution_order = self.resolve_skill_dependencies(skill_name, n, max_inventory_capacity)
-        
+        execution_order = self.resolve_skill_dependencies(
+            skill_name,
+            n,
+            max_inventory_capacity,
+            use_symbolic_state=use_symbolic_state,
+            initial_symbolic_state=initial_symbolic_state,
+        )
+
         # Default output path if not provided
         if output_path is None:
             safe_name = skill_name.lower().replace(' ', '_').replace('-', '_')
             output_path = Path(f"{safe_name}_n{n}.py")
         else:
             output_path = Path(output_path)
-            
+
         # Write to file
         skills_written = self.write_execution_order_to_file(execution_order, output_path)
-        
+
         print(f"\n=== MODULE CREATION COMPLETE ===")
         print(f"Target skill: {skill_name} (n={n})")
         print(f"Execution steps: {len(execution_order)}")
         print(f"Skills with code written: {skills_written}")
         print(f"Output file: {output_path.absolute()}")
-        
+
         return execution_order, skills_written
         
     def test_reuse_workflow(self):
@@ -1087,3 +1177,7 @@ if __name__ == "__main__":
     tester.show_graph_info()
     print("\nTesting main workflow...")
     tester.test_main_workflow()
+
+    print("\nSymbolic resolver example...")
+    symbolic_order = tester.resolve_skill_dependencies_symbolic("Make Stone Sword", n=1)
+    print(f"Symbolic execution order: {symbolic_order}")

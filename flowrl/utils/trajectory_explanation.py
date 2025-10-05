@@ -1,7 +1,11 @@
-from craftax.craftax_classic.constants import BlockType
-from craftax.craftax.constants import BlockType as BlockType_craftax
+from craftax.craftax_classic.constants import BlockType, Achievement as ClassicAchievement
+from craftax.craftax.constants import (
+    BlockType as BlockType_craftax,
+    Achievement as CraftaxAchievement,
+)
 import jax.numpy as jnp
 import jax
+import numpy as np
 
 
 def extract_first_valid_subsequence(env_states, actions, start_value=12, end_value=13):
@@ -47,18 +51,50 @@ def extract_first_valid_subsequence(env_states, actions, start_value=12, end_val
     )
 
 
-from craftax.craftax_classic.constants import (
-    Action,
-)
+from craftax.craftax_classic.constants import Action as ClassicAction
+from craftax.craftax.constants import Action as CraftaxAction
 
 
-def explain_inventory_changes(subseq, actions):
+def _resolve_achievement_enum(num_entries):
+    """Return the achievement Enum matching the array length."""
+    try:
+        if num_entries == len(CraftaxAchievement):
+            return CraftaxAchievement
+    except Exception:
+        pass
+    try:
+        if num_entries == len(ClassicAchievement):
+            return ClassicAchievement
+    except Exception:
+        pass
+    return None
+
+
+def explain_inventory_changes(subseq, actions, game="craftax"):
     """
     Explain inventory changes in natural language for each timestep,
     including the action performed when inventory changes
+
+    Args:
+        subseq: Subsequence of environment states
+        actions: Array of actions taken
+        game: Either "craftax" or "craftax_classic" to determine which Action enum to use
     """
     explanations = []
     inventory_diff = subseq.inventory_diff
+    achievements_diff = getattr(subseq, "achievements_diff", None)
+    achievements = getattr(subseq, "achievements", None)
+
+    # Level / stat fields that may exist on Craftax environments
+    level_fields = []
+    for field_name in [
+        "player_level",
+        "player_strength",
+        "player_dexterity",
+        "player_intelligence",
+    ]:
+        if hasattr(subseq, field_name):
+            level_fields.append(field_name)
 
     # Get all item names from the inventory structure
     item_names = inventory_diff.__dict__.keys()
@@ -66,6 +102,14 @@ def explain_inventory_changes(subseq, actions):
     # Find the length of the sequence by checking the first item array
     first_item = next(iter(item_names))
     seq_length = len(getattr(inventory_diff, first_item))
+
+    achievement_enum = None
+    if achievements_diff is not None:
+        try:
+            num_achievements = achievements_diff.shape[-1]
+        except AttributeError:
+            num_achievements = len(achievements_diff[0]) if len(achievements_diff) > 0 else 0
+        achievement_enum = _resolve_achievement_enum(num_achievements)
 
     # Iterate through each timestep
     for t in range(seq_length):
@@ -75,21 +119,72 @@ def explain_inventory_changes(subseq, actions):
         for item_name in item_names:
             item_array = getattr(inventory_diff, item_name)
 
-            # If this item had a change at this timestep
-            if item_array[t] != 0:
-                change = item_array[t]
-                if change > 0:
-                    timestep_changes.append(f"Gained {int(change)} {item_name}")
-                else:
-                    timestep_changes.append(f"Lost {int(abs(change))} {item_name}")
+            # Handle array fields (armour, potions) - must have shape and be non-scalar
+            is_array = hasattr(item_array[t], 'shape') and item_array[t].shape != ()
+
+            if is_array:
+                # For array fields, check each element
+                changes = item_array[t]
+                for idx, change in enumerate(changes):
+                    if change != 0:
+                        if change > 0:
+                            timestep_changes.append(f"Gained {int(change)} {item_name}[{idx}]")
+                        else:
+                            timestep_changes.append(f"Lost {int(abs(change))} {item_name}[{idx}]")
+            else:
+                # Handle scalar fields (wood, stone, etc.) and 0-d arrays
+                if item_array[t] != 0:
+                    change = item_array[t]
+                    if change > 0:
+                        timestep_changes.append(f"Gained {int(change)} {item_name}")
+                    else:
+                        timestep_changes.append(f"Lost {int(abs(change))} {item_name}")
+
+        # Check achievements unlocked at this timestep
+        if achievements_diff is not None:
+            ach_step = achievements_diff[t]
+            if hasattr(ach_step, "shape"):
+                ach_indices = jnp.where(ach_step)[0].tolist()
+            else:
+                ach_indices = [i for i, val in enumerate(ach_step) if val]
+            if len(ach_indices) > 0:
+                names = []
+                for idx in ach_indices:
+                    if achievement_enum is not None:
+                        names.append(achievement_enum(idx).name.lower())
+                    else:
+                        names.append(f"achievement_{int(idx)}")
+                timestep_changes.append(
+                    "Unlocked achievements: " + ", ".join(names)
+                )
+
+        # Track level/stat increases
+        for field_name in level_fields:
+            field_values = getattr(subseq, field_name)
+            # For the first timestep we cannot compare with previous step, so skip
+            if t == 0:
+                continue
+            prev_val = field_values[t - 1]
+            curr_val = field_values[t]
+            if curr_val > prev_val:
+                field_readable = field_name.replace("player_", "").replace("_", " ")
+                timestep_changes.append(
+                    f"Increased {field_readable} to {int(curr_val)}"
+                )
 
         # If there were any changes at this timestep, add an explanation with the action
         if timestep_changes:
             # Get the action index for this timestep
-            action_idx = actions[t]
+            action_idx = int(actions[t])
 
-            # Convert action index to action name
-            action_name = Action._member_names_[action_idx]
+            # Convert action index to action name based on game type
+            try:
+                if game == "craftax":
+                    action_name = CraftaxAction(action_idx).name
+                else:
+                    action_name = ClassicAction(action_idx).name
+            except (ValueError, IndexError):
+                action_name = f"UNKNOWN_ACTION_{action_idx}"
 
             explanation = f"Timestep {t}: Action: {action_name}, " + ", ".join(
                 timestep_changes
@@ -99,12 +194,20 @@ def explain_inventory_changes(subseq, actions):
     return explanations
 
 
-def explain_trajectory(env_states, actions, start_state):
+def explain_trajectory(env_states, actions, start_state, game="craftax"):
+    """
+    Extract and explain a trajectory segment.
 
+    Args:
+        env_states: Environment states
+        actions: Array of actions
+        start_state: Starting state value
+        game: Either "craftax" or "craftax_classic"
+    """
     subseq, actions_subseq = extract_first_valid_subsequence(
         env_states, actions, start_value=start_state, end_value=start_state + 1
     )
-    explanation = explain_inventory_changes(subseq, actions_subseq)
+    explanation = explain_inventory_changes(subseq, actions_subseq, game=game)
     return explanation
 
 

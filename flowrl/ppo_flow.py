@@ -90,7 +90,9 @@ def make_train(config, prev_model_state=None, return_test_network=False):
     env_params = env.default_params
 
     # Update env_params with intrinsics_reward setting
-    env_params = env_params.replace(intrinsics_reward=config["INTRINSICS_REWARD"])
+    intrinsics_reward = config.get("INTRINSICS_REWARD", False)
+    if hasattr(env_params, "intrinsics_reward"):
+        env_params = env_params.replace(intrinsics_reward=intrinsics_reward)
 
     heads, num_heads = env.heads_info
 
@@ -280,7 +282,7 @@ def make_train(config, prev_model_state=None, return_test_network=False):
                     (jnp.zeros_like(last_val), last_val),
                     traj_batch,
                     reverse=True,
-                    unroll=16,
+                    #unroll=16,
                 )
                 return advantages, advantages + traj_batch.value
 

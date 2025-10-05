@@ -12,6 +12,7 @@ import flowrl
 from flowrl.llm.compose_prompts import ComposeBasePrompt, ComposeReasoningPrompt
 from flowrl.llm.craftax_classic.after_queries import *
 import agentkit
+import json
 
 from agentkit import Graph, SimpleDBNode
 
@@ -31,22 +32,22 @@ try:
     llm_name = "yintat-gpt-4o"
 except:
     get_query = agentkit.llm_api.get_query
-    llm_name = "gpt-4.1"
+    llm_name = "gpt-5"
     # llm_name = "google-gemini-2.0-pro-exp-02-05"
     # llm_name = "google-gemini-2.0-flash-thinking-exp"
 
 
-class SaveManualAfterQuery(aq.BaseAfterQuery):
+class SaveManualAfterQuery(aq.JsonAfterQuery):
     def __init__(self):
         super().__init__()
-        self.type = str
+        self.type = dict
         # self.required_keys = [
         #     "manual",
         # ]
         # self.length = len(self.keys)
 
     def post_process(self):
-        self.node.db["manual"] = self.node.result
+        self.node.db["knowledgebase"] = self.parse_json()[-1]
 
 
 def generate_graph(db=None, return_inventory_graph=False):
@@ -108,32 +109,65 @@ def return_prompts(LLM_API_FUNCTION_GPT4):
     inventory_prompts["predict_item_count"] = {
         "prompt": """
         
-You are an expert writing a game manual for the game Craftax. The goal is for the player to have all information needed to play the game.
-You are given the following information:
+Make a knowledge base for the game Crafter. The goal of this knowledge base is to serve as a source of verified information for an agent playing the game. For each action, enumerate the possible requirements for performing that action. Return your response in a json format
 
-Craftax ICML Paper
-```
-$db.paper$
-```
-
-Craftax Game Logic
-```
-$db.game_logic$
-```
+Make the hierarchy: action which will itself be a dictionary with the action name as the key, and then within that dictionary, list each instance of the action as a separate key, with the value being a list of requirements for that action in that context.
 
 
-## Review requirements
-1. Explains all game rules, mechanics, and systems
+@struct.dataclass
+class Inventory:
+    wood: int = 0
+    stone: int = 0
+    coal: int = 0
+    iron: int = 0
+    diamond: int = 0
+    sapling: int = 0
+    wood_pickaxe: int = 0
+    stone_pickaxe: int = 0
+    iron_pickaxe: int = 0
+    wood_sword: int = 0
+    stone_sword: int = 0
+    iron_sword: int = 0
+#max inventory size is 9 for each item
 
-## Invidiaul Achievement Decomposition
-For every achievement or objective indiviaully:
-   - Lists all prerequisites
-   - Details each individual step required
-   - Explains any specific techniques or approaches needed
-   - Provides specific quantities, requirements, and conditions wherever relevant
+# ENUMS
+class BlockType(Enum):
+    INVALID = 0
+    OUT_OF_BOUNDS = 1
+    GRASS = 2
+    WATER = 3
+    STONE = 4
+    TREE = 5
+    WOOD = 6
+    PATH = 7
+    COAL = 8
+    IRON = 9
+    DIAMOND = 10
+    CRAFTING_TABLE = 11
+    FURNACE = 12
+    SAND = 13
+    LAVA = 14
+    PLANT = 15
+    RIPE_PLANT = 16
 
-
-The manual should be thorough enough that even inexperienced players can follow along without having to guess or experiment.
+class Action(Enum):
+    NOOP = 0  #
+    LEFT = 1  # a
+    RIGHT = 2  # d
+    UP = 3  # w
+    DOWN = 4  # s
+    DO = 5  # space
+    SLEEP = 6  # tab
+    PLACE_STONE = 7  # r
+    PLACE_TABLE = 8  # t
+    PLACE_FURNACE = 9  # f
+    PLACE_PLANT = 10  # p
+    MAKE_WOOD_PICKAXE = 11  # 1
+    MAKE_STONE_PICKAXE = 12  # 2
+    MAKE_IRON_PICKAXE = 13  # 3
+    MAKE_WOOD_SWORD = 14  # 4
+    MAKE_STONE_SWORD = 15  # 5
+    MAKE_IRON_SWORD = 16  # 6
 
         """,
         "dep": [],
@@ -165,9 +199,8 @@ def main(game_logic_path, paper_path):
 
     answer = graph.evaluate()
 
-    # # Save outputs
-    with open("/home/renos/flow-rl/resources/craftax_manual.txt", "w") as f:
-        f.write(db["manual"])
+    with open("/home/renos/flow-rl/resources/craftax_classic_knowledgebase.json", "w") as f:
+        json.dump(db["knowledgebase"], f, indent=2)
 
     # with open("agent_prompt_template.txt", "w") as f:
     #     f.write(agent_prompt)

@@ -1,5 +1,5 @@
 from flowrl.llm.compose_prompts import ComposeReasoningPrompt
-from flowrl.llm.craftax_classic.after_queries import *
+from flowrl.llm.craftax.after_queries import *
 
 
 def return_prompts(LLM_API_FUNCTION_GPT4):
@@ -11,19 +11,23 @@ def return_prompts(LLM_API_FUNCTION_GPT4):
 Environment Details:
 @struct.dataclass
 class Inventory:
-    wood: int = 0
-    stone: int = 0
-    coal: int = 0
-    iron: int = 0
-    diamond: int = 0
-    sapling: int = 0
-    wood_pickaxe: int = 0
-    stone_pickaxe: int = 0
-    iron_pickaxe: int = 0
-    wood_sword: int = 0
-    stone_sword: int = 0
-    iron_sword: int = 0
-#max inventory size is 9 for each item
+    wood: int
+    stone: int
+    coal: int
+    iron: int
+    diamond: int
+    sapling: int
+    pickaxe: int
+    sword: int
+    bow: int
+    arrows: int
+    armour: jnp.ndarray
+    torches: int
+    ruby: int
+    sapphire: int
+    potions: jnp.ndarray
+    books: int
+# Max inventory values are higher in Craftax vs Craftax Classic
 
 # ENUMS
 class BlockType(Enum):
@@ -44,6 +48,26 @@ class BlockType(Enum):
     LAVA = 14
     PLANT = 15
     RIPE_PLANT = 16
+    WALL = 17
+    DARKNESS = 18
+    WALL_MOSS = 19
+    STALAGMITE = 20
+    SAPPHIRE = 21
+    RUBY = 22
+    CHEST = 23
+    FOUNTAIN = 24
+    FIRE_GRASS = 25
+    ICE_GRASS = 26
+    GRAVEL = 27
+    FIRE_TREE = 28
+    ICE_SHRUB = 29
+    ENCHANTMENT_TABLE_FIRE = 30
+    ENCHANTMENT_TABLE_ICE = 31
+    NECROMANCER = 32
+    GRAVE = 33
+    GRAVE2 = 34
+    GRAVE3 = 35
+    NECROMANCER_VULNERABLE = 36
 
 class Action(Enum):
     NOOP = 0  #
@@ -63,6 +87,32 @@ class Action(Enum):
     MAKE_WOOD_SWORD = 14  # 4
     MAKE_STONE_SWORD = 15  # 5
     MAKE_IRON_SWORD = 16  # 6
+    REST = 17  # e
+    DESCEND = 18  # >
+    ASCEND = 19  # <
+    MAKE_DIAMOND_PICKAXE = 20  # 4
+    MAKE_DIAMOND_SWORD = 21  # 8
+    MAKE_IRON_ARMOUR = 22  # y
+    MAKE_DIAMOND_ARMOUR = 23  # u
+    SHOOT_ARROW = 24  # i
+    MAKE_ARROW = 25  # o
+    CAST_FIREBALL = 26  # g
+    CAST_ICEBALL = 27  # h
+    PLACE_TORCH = 28  # j
+    DRINK_POTION_RED = 29  # z
+    DRINK_POTION_GREEN = 30  # x
+    DRINK_POTION_BLUE = 31  # c
+    DRINK_POTION_PINK = 32  # v
+    DRINK_POTION_CYAN = 33  # b
+    DRINK_POTION_YELLOW = 34  # n
+    READ_BOOK = 35  # m
+    ENCHANT_SWORD = 36  # k
+    ENCHANT_ARMOUR = 37  # l
+    MAKE_TORCH = 38  # [
+    LEVEL_UP_DEXTERITY = 39  # ]
+    LEVEL_UP_STRENGTH = 40  # -
+    LEVEL_UP_INTELLIGENCE = 41  # =
+    ENCHANT_BOW = 42  # ;
 
 class Achievement(Enum):
     COLLECT_WOOD = 0
@@ -87,6 +137,51 @@ class Achievement(Enum):
     COLLECT_DIAMOND = 19
     MAKE_IRON_PICKAXE = 20
     MAKE_IRON_SWORD = 21
+    MAKE_ARROW = 22
+    MAKE_TORCH = 23
+    PLACE_TORCH = 24
+    COLLECT_SAPPHIRE = 54
+    COLLECT_RUBY = 59
+    MAKE_DIAMOND_PICKAXE = 60
+    MAKE_DIAMOND_SWORD = 25
+    MAKE_IRON_ARMOUR = 26
+    MAKE_DIAMOND_ARMOUR = 27
+    ENTER_GNOMISH_MINES = 28
+    ENTER_DUNGEON = 29
+    ENTER_SEWERS = 30
+    ENTER_VAULT = 31
+    ENTER_TROLL_MINES = 32
+    ENTER_FIRE_REALM = 33
+    ENTER_ICE_REALM = 34
+    ENTER_GRAVEYARD = 35
+    DEFEAT_GNOME_WARRIOR = 36
+    DEFEAT_GNOME_ARCHER = 37
+    DEFEAT_ORC_SOLIDER = 38
+    DEFEAT_ORC_MAGE = 39
+    DEFEAT_LIZARD = 40
+    DEFEAT_KOBOLD = 41
+    DEFEAT_KNIGHT = 65
+    DEFEAT_ARCHER = 66
+    DEFEAT_TROLL = 42
+    DEFEAT_DEEP_THING = 43
+    DEFEAT_PIGMAN = 44
+    DEFEAT_FIRE_ELEMENTAL = 45
+    DEFEAT_FROST_TROLL = 46
+    DEFEAT_ICE_ELEMENTAL = 47
+    DAMAGE_NECROMANCER = 48
+    DEFEAT_NECROMANCER = 49
+    EAT_BAT = 50
+    EAT_SNAIL = 51
+    FIND_BOW = 52
+    FIRE_BOW = 53
+    LEARN_FIREBALL = 55
+    CAST_FIREBALL = 56
+    LEARN_ICEBALL = 57
+    CAST_ICEBALL = 58
+    OPEN_CHEST = 61
+    DRINK_POTION = 62
+    ENCHANT_SWORD = 63
+    ENCHANT_ARMOUR = 64
 
 Knowledgebase:
 ```
@@ -223,21 +318,46 @@ class BlockType(Enum):
     LAVA = 14
     PLANT = 15
     RIPE_PLANT = 16
-# Max inventory value is 9, max player intrinsics values are also 9 
+    WALL = 17
+    DARKNESS = 18
+    WALL_MOSS = 19
+    STALAGMITE = 20
+    SAPPHIRE = 21
+    RUBY = 22
+    CHEST = 23
+    FOUNTAIN = 24
+    FIRE_GRASS = 25
+    ICE_GRASS = 26
+    GRAVEL = 27
+    FIRE_TREE = 28
+    ICE_SHRUB = 29
+    ENCHANTMENT_TABLE_FIRE = 30
+    ENCHANTMENT_TABLE_ICE = 31
+    NECROMANCER = 32
+    GRAVE = 33
+    GRAVE2 = 34
+    GRAVE3 = 35
+    NECROMANCER_VULNERABLE = 36
+    
+# Inventory has much larger capacity than Classic version
 @struct.dataclass
 class Inventory:
-    wood: int = 0
-    stone: int = 0
-    coal: int = 0
-    iron: int = 0
-    diamond: int = 0
-    sapling: int = 0
-    wood_pickaxe: int = 0
-    stone_pickaxe: int = 0
-    iron_pickaxe: int = 0
-    wood_sword: int = 0
-    stone_sword: int = 0
-    iron_sword: int = 0
+    wood: int
+    stone: int
+    coal: int
+    iron: int
+    diamond: int
+    sapling: int
+    pickaxe: int
+    sword: int
+    bow: int
+    arrows: int
+    armour: jnp.ndarray
+    torches: int
+    ruby: int
+    sapphire: int
+    potions: jnp.ndarray
+    books: int
 
 class Achievement(Enum):
     COLLECT_WOOD = 0
@@ -262,6 +382,51 @@ class Achievement(Enum):
     COLLECT_DIAMOND = 19
     MAKE_IRON_PICKAXE = 20
     MAKE_IRON_SWORD = 21
+    MAKE_ARROW = 22
+    MAKE_TORCH = 23
+    PLACE_TORCH = 24
+    COLLECT_SAPPHIRE = 54
+    COLLECT_RUBY = 59
+    MAKE_DIAMOND_PICKAXE = 60
+    MAKE_DIAMOND_SWORD = 25
+    MAKE_IRON_ARMOUR = 26
+    MAKE_DIAMOND_ARMOUR = 27
+    ENTER_GNOMISH_MINES = 28
+    ENTER_DUNGEON = 29
+    ENTER_SEWERS = 30
+    ENTER_VAULT = 31
+    ENTER_TROLL_MINES = 32
+    ENTER_FIRE_REALM = 33
+    ENTER_ICE_REALM = 34
+    ENTER_GRAVEYARD = 35
+    DEFEAT_GNOME_WARRIOR = 36
+    DEFEAT_GNOME_ARCHER = 37
+    DEFEAT_ORC_SOLIDER = 38
+    DEFEAT_ORC_MAGE = 39
+    DEFEAT_LIZARD = 40
+    DEFEAT_KOBOLD = 41
+    DEFEAT_KNIGHT = 65
+    DEFEAT_ARCHER = 66
+    DEFEAT_TROLL = 42
+    DEFEAT_DEEP_THING = 43
+    DEFEAT_PIGMAN = 44
+    DEFEAT_FIRE_ELEMENTAL = 45
+    DEFEAT_FROST_TROLL = 46
+    DEFEAT_ICE_ELEMENTAL = 47
+    DAMAGE_NECROMANCER = 48
+    DEFEAT_NECROMANCER = 49
+    EAT_BAT = 50
+    EAT_SNAIL = 51
+    FIND_BOW = 52
+    FIRE_BOW = 53
+    LEARN_FIREBALL = 55
+    CAST_FIREBALL = 56
+    LEARN_ICEBALL = 57
+    CAST_ICEBALL = 58
+    OPEN_CHEST = 61
+    DRINK_POTION = 62
+    ENCHANT_SWORD = 63
+    ENCHANT_ARMOUR = 64
 ```
 The reward function is calculated independently at each timestep using these available factors:
 
@@ -359,21 +524,46 @@ class BlockType(Enum):
     LAVA = 14
     PLANT = 15
     RIPE_PLANT = 16
-# Max inventory value is 9, max player intrinsics values are also 9 
+    WALL = 17
+    DARKNESS = 18
+    WALL_MOSS = 19
+    STALAGMITE = 20
+    SAPPHIRE = 21
+    RUBY = 22
+    CHEST = 23
+    FOUNTAIN = 24
+    FIRE_GRASS = 25
+    ICE_GRASS = 26
+    GRAVEL = 27
+    FIRE_TREE = 28
+    ICE_SHRUB = 29
+    ENCHANTMENT_TABLE_FIRE = 30
+    ENCHANTMENT_TABLE_ICE = 31
+    NECROMANCER = 32
+    GRAVE = 33
+    GRAVE2 = 34
+    GRAVE3 = 35
+    NECROMANCER_VULNERABLE = 36
+    
+# Inventory has much higher capacities than Classic version
 @struct.dataclass
 class Inventory:
-    wood: int = 0
-    stone: int = 0
-    coal: int = 0
-    iron: int = 0
-    diamond: int = 0
-    sapling: int = 0
-    wood_pickaxe: int = 0
-    stone_pickaxe: int = 0
-    iron_pickaxe: int = 0
-    wood_sword: int = 0
-    stone_sword: int = 0
-    iron_sword: int = 0
+    wood: int
+    stone: int
+    coal: int
+    iron: int
+    diamond: int
+    sapling: int
+    pickaxe: int
+    sword: int
+    bow: int
+    arrows: int
+    armour: jnp.ndarray
+    torches: int
+    ruby: int
+    sapphire: int
+    potions: jnp.ndarray
+    books: int
 
 class Achievement(Enum):
     COLLECT_WOOD = 0
@@ -398,6 +588,51 @@ class Achievement(Enum):
     COLLECT_DIAMOND = 19
     MAKE_IRON_PICKAXE = 20
     MAKE_IRON_SWORD = 21
+    MAKE_ARROW = 22
+    MAKE_TORCH = 23
+    PLACE_TORCH = 24
+    COLLECT_SAPPHIRE = 54
+    COLLECT_RUBY = 59
+    MAKE_DIAMOND_PICKAXE = 60
+    MAKE_DIAMOND_SWORD = 25
+    MAKE_IRON_ARMOUR = 26
+    MAKE_DIAMOND_ARMOUR = 27
+    ENTER_GNOMISH_MINES = 28
+    ENTER_DUNGEON = 29
+    ENTER_SEWERS = 30
+    ENTER_VAULT = 31
+    ENTER_TROLL_MINES = 32
+    ENTER_FIRE_REALM = 33
+    ENTER_ICE_REALM = 34
+    ENTER_GRAVEYARD = 35
+    DEFEAT_GNOME_WARRIOR = 36
+    DEFEAT_GNOME_ARCHER = 37
+    DEFEAT_ORC_SOLIDER = 38
+    DEFEAT_ORC_MAGE = 39
+    DEFEAT_LIZARD = 40
+    DEFEAT_KOBOLD = 41
+    DEFEAT_KNIGHT = 65
+    DEFEAT_ARCHER = 66
+    DEFEAT_TROLL = 42
+    DEFEAT_DEEP_THING = 43
+    DEFEAT_PIGMAN = 44
+    DEFEAT_FIRE_ELEMENTAL = 45
+    DEFEAT_FROST_TROLL = 46
+    DEFEAT_ICE_ELEMENTAL = 47
+    DAMAGE_NECROMANCER = 48
+    DEFEAT_NECROMANCER = 49
+    EAT_BAT = 50
+    EAT_SNAIL = 51
+    FIND_BOW = 52
+    FIRE_BOW = 53
+    LEARN_FIREBALL = 55
+    CAST_FIREBALL = 56
+    LEARN_ICEBALL = 57
+    CAST_ICEBALL = 58
+    OPEN_CHEST = 61
+    DRINK_POTION = 62
+    ENCHANT_SWORD = 63
+    ENCHANT_ARMOUR = 64
 
 #when indexing an enum make sure to use .value
 
@@ -416,9 +651,9 @@ def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev,
         # to get the l2 distance of the agent from the closest diamond for example would be jnp.linalg.norm(closest_blocks[BlockType.DIAMOND.value, :, 0]), closest_bocks_changes = l2dist(closest_blocks_prev) - l2dist(closest_blocks)
         closest_blocks_prev (numpy.ndarray): A 3D array of shape (len(BlockType), 2, K) representing the K closest blocks of each type in the previous timestep. Default values are (30, 30) for unseen blocks.
         #default of 30,30 if less then k seen, ordered by distance (so :,:,0 would be the closest of each block type
-        player_intrinsics (jnp.ndarray): An len 4 array representing the player's health, food, drink, and energy levels
-        player_intrinsics_diff (jnp.ndarray): An len 4 array representing the change in the player's health, food, drink, and energy levels
-        achievements (jnp.ndarray): A 1D array (22,) of achievements, where each element is an boolean indicating the corresponding achievement has been completed.
+        player_intrinsics (jnp.ndarray): An len 5 array representing the player's health, food, drink, energy, and mana levels
+        player_intrinsics_diff (jnp.ndarray): An len 5 array representing the change in the player's health, food, drink, energy, and mana levels
+        achievements (jnp.ndarray): A 1D array (67,) of achievements, where each element is an boolean indicating the corresponding achievement has been completed.
         n (int): The target amount to reach in inventory for the main gain item.
 
     Returns:
@@ -440,8 +675,8 @@ def task_reward(inventory_diff, closest_blocks, closest_blocks_prev, player_intr
         closest_blocks_prev (numpy.ndarray): A 3D array of shape (len(BlockType), 2, K) representing the K closest blocks of each type in the previous timestep. Default values are (30, 30) for unseen blocks.
         #default of 30,30 if less then k seen, ordered by distance (so :,:,0 would be the closest of each block type
         health_penalty (float): The penalty for losing health. Negative when loosing health and positive when regaining health.
-        player_intrinsics_diff (jnp.ndarray): An len 4 array representing the change in the player's health, food, drink, and energy levels
-        achievements_diff (jnp.ndarray): A 1D array (22,) of achievements, where each element is an boolean indicating whether the achievement was completed in the last timestep. If the achievement was already completed previously, it will not indicate the achievement was completed again.
+        player_intrinsics_diff (jnp.ndarray): An len 5 array representing the change in the player's health, food, drink, energy, and mana levels
+        achievements_diff (jnp.ndarray): A 1D array (67,) of achievements, where each element is an boolean indicating whether the achievement was completed in the last timestep. If the achievement was already completed previously, it will not indicate the achievement was completed again.
 
     Returns:
         float: Reward for RL agent
@@ -500,8 +735,8 @@ No need to add coefficents to rewards, for example, no need for 10 * inventory_d
 Return all three functions in a single code block, don't seperate it into 3.
 No need to return the docstrings.
 Your code will be pasted into a file that already has the following imports. Do not add any additional imports.
-from craftax.craftax_classic.constants import *
-from craftax.craftax_classic.envs.craftax_state import Inventory
+from craftax.craftax.constants import *
+from craftax.craftax.craftax_state import Inventory
 import jax
         """,
         "dep": [],

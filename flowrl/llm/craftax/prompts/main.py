@@ -1,5 +1,5 @@
 from flowrl.llm.compose_prompts import ComposeReasoningPrompt
-from flowrl.llm.craftax_classic.after_queries import *
+from flowrl.llm.craftax.after_queries import *
 
 
 def return_prompts(LLM_API_FUNCTION_GPT4):
@@ -11,19 +11,23 @@ def return_prompts(LLM_API_FUNCTION_GPT4):
 Environment Details:
 @struct.dataclass
 class Inventory:
-    wood: int = 0
-    stone: int = 0
-    coal: int = 0
-    iron: int = 0
-    diamond: int = 0
-    sapling: int = 0
-    wood_pickaxe: int = 0
-    stone_pickaxe: int = 0
-    iron_pickaxe: int = 0
-    wood_sword: int = 0
-    stone_sword: int = 0
-    iron_sword: int = 0
-#max inventory size is 9 for each item
+    wood: int
+    stone: int
+    coal: int
+    iron: int
+    diamond: int
+    sapling: int
+    pickaxe: int  # Tier indicator: 0=none, 1=wood, 2=stone, 3=iron, 4=diamond
+    sword: int  # Tier indicator: 0=none, 1=wood, 2=stone, 3=iron, 4=diamond
+    bow: int
+    arrows: int
+    armour: jnp.ndarray  # Array of 4 armor pieces: [helmet, chestplate, leggings, boots], each 0-2 representing tier
+    torches: int
+    ruby: int
+    sapphire: int
+    potions: jnp.ndarray  # Array of 6 potion types: [red, green, blue, pink, cyan, yellow], each storing count
+    books: int
+# Max inventory values are higher in Craftax vs Craftax Classic
 
 # ENUMS
 class BlockType(Enum):
@@ -44,6 +48,26 @@ class BlockType(Enum):
     LAVA = 14
     PLANT = 15
     RIPE_PLANT = 16
+    WALL = 17
+    DARKNESS = 18
+    WALL_MOSS = 19
+    STALAGMITE = 20
+    SAPPHIRE = 21
+    RUBY = 22
+    CHEST = 23
+    FOUNTAIN = 24
+    FIRE_GRASS = 25
+    ICE_GRASS = 26
+    GRAVEL = 27
+    FIRE_TREE = 28
+    ICE_SHRUB = 29
+    ENCHANTMENT_TABLE_FIRE = 30
+    ENCHANTMENT_TABLE_ICE = 31
+    NECROMANCER = 32
+    GRAVE = 33
+    GRAVE2 = 34
+    GRAVE3 = 35
+    NECROMANCER_VULNERABLE = 36
 
 class Action(Enum):
     NOOP = 0  #
@@ -63,6 +87,32 @@ class Action(Enum):
     MAKE_WOOD_SWORD = 14  # 4
     MAKE_STONE_SWORD = 15  # 5
     MAKE_IRON_SWORD = 16  # 6
+    REST = 17  # e
+    DESCEND = 18  # >
+    ASCEND = 19  # <
+    MAKE_DIAMOND_PICKAXE = 20  # 4
+    MAKE_DIAMOND_SWORD = 21  # 8
+    MAKE_IRON_ARMOUR = 22  # y
+    MAKE_DIAMOND_ARMOUR = 23  # u
+    SHOOT_ARROW = 24  # i
+    MAKE_ARROW = 25  # o
+    CAST_FIREBALL = 26  # g
+    CAST_ICEBALL = 27  # h
+    PLACE_TORCH = 28  # j
+    DRINK_POTION_RED = 29  # z
+    DRINK_POTION_GREEN = 30  # x
+    DRINK_POTION_BLUE = 31  # c
+    DRINK_POTION_PINK = 32  # v
+    DRINK_POTION_CYAN = 33  # b
+    DRINK_POTION_YELLOW = 34  # n
+    READ_BOOK = 35  # m
+    ENCHANT_SWORD = 36  # k
+    ENCHANT_ARMOUR = 37  # l
+    MAKE_TORCH = 38  # [
+    LEVEL_UP_DEXTERITY = 39  # ]
+    LEVEL_UP_STRENGTH = 40  # -
+    LEVEL_UP_INTELLIGENCE = 41  # =
+    ENCHANT_BOW = 42  # ;
 
 class Achievement(Enum):
     COLLECT_WOOD = 0
@@ -87,6 +137,51 @@ class Achievement(Enum):
     COLLECT_DIAMOND = 19
     MAKE_IRON_PICKAXE = 20
     MAKE_IRON_SWORD = 21
+    MAKE_ARROW = 22
+    MAKE_TORCH = 23
+    PLACE_TORCH = 24
+    COLLECT_SAPPHIRE = 54
+    COLLECT_RUBY = 59
+    MAKE_DIAMOND_PICKAXE = 60
+    MAKE_DIAMOND_SWORD = 25
+    MAKE_IRON_ARMOUR = 26
+    MAKE_DIAMOND_ARMOUR = 27
+    ENTER_GNOMISH_MINES = 28
+    ENTER_DUNGEON = 29
+    ENTER_SEWERS = 30
+    ENTER_VAULT = 31
+    ENTER_TROLL_MINES = 32
+    ENTER_FIRE_REALM = 33
+    ENTER_ICE_REALM = 34
+    ENTER_GRAVEYARD = 35
+    DEFEAT_GNOME_WARRIOR = 36
+    DEFEAT_GNOME_ARCHER = 37
+    DEFEAT_ORC_SOLIDER = 38
+    DEFEAT_ORC_MAGE = 39
+    DEFEAT_LIZARD = 40
+    DEFEAT_KOBOLD = 41
+    DEFEAT_KNIGHT = 65
+    DEFEAT_ARCHER = 66
+    DEFEAT_TROLL = 42
+    DEFEAT_DEEP_THING = 43
+    DEFEAT_PIGMAN = 44
+    DEFEAT_FIRE_ELEMENTAL = 45
+    DEFEAT_FROST_TROLL = 46
+    DEFEAT_ICE_ELEMENTAL = 47
+    DAMAGE_NECROMANCER = 48
+    DEFEAT_NECROMANCER = 49
+    EAT_BAT = 50
+    EAT_SNAIL = 51
+    FIND_BOW = 52
+    FIRE_BOW = 53
+    LEARN_FIREBALL = 55
+    CAST_FIREBALL = 56
+    LEARN_ICEBALL = 57
+    CAST_ICEBALL = 58
+    OPEN_CHEST = 61
+    DRINK_POTION = 62
+    ENCHANT_SWORD = 63
+    ENCHANT_ARMOUR = 64
 
 Knowledgebase:
 ```
@@ -98,18 +193,56 @@ Existing Skills:
 $db.skills_without_code$
 ```
 
+Current Symbolic Frontier:
+```
+$db.frontier_summary$
+```
+
 # Instruction
-Consider the knowledgebase, and existing skills. Identify the next skill that should be learned. Pay special attention to the task requirements and action prerequisites from the knowledgebase.
+Consider the knowledgebase, existing skills, and current frontier. Identify the next skill that should be learned. Pay special attention to the task requirements and action prerequisites from the knowledgebase.
+
+**CRITICAL: FRONTIER-GUIDED SKILL PROPOSAL**
+- The frontier summary shows the current reachable symbolic states (inventory items, achievements, levels) based on existing skills
+- You MUST propose a skill that extends this frontier by achieving NEW symbolic states not currently reachable
+- Verify that your proposed skill's preconditions are FEASIBLE (can be satisfied by current frontier)
+- Verify that your proposed skill's gains are NOVEL (not already achievable by existing skills)
+
 Fill out the following sections explicitly before arriving at the final formatted output.
 
 ## Review Existing Skills
 In a few sentences, review existing skills.
 
+## Frontier Analysis
+Analyze the current symbolic frontier:
+- What inventory items, achievements, and levels are currently reachable?
+- What are the obvious gaps or next logical extensions to this frontier?
+- Which symbolic states would be most valuable to reach next?
+
 ## Future Objectives
-List up to 3 potential future objectives that the player could work toward next. For each objective, briefly discuss the necessity, benefits, requirements. Do not propose any skill which has already been learned.
+List 2-3 concrete next skills that extend the current frontier. For each, provide ONE sentence covering:
+- Novel gains (new inventory/achievements/levels not in frontier)
+- Feasibility (requirements satisfied by frontier)
+Keep this section brief and focused.
 
 ## Immediate Objective
-Identify the next skill the player should learn based on your analysis. CRITICAL: Do NOT propose any skill that already exists in the existing skills list. You should only propose NEW skills whose requirements can be fulfilled by preexisting skills. 
+State the single best next skill and justify it in 1-2 sentences based on frontier analysis.
+
+CRITICAL CHECKS:
+- Skill does NOT already exist in existing skills
+- Requirements CAN be fulfilled by current frontier
+- Gains are NEW (extend beyond current frontier)
+
+# Gain Schema
+Each skill has ONE primary goal. Include all symbolic state changes that occur from achieving that goal.
+
+Format: `"key": {"type": "inventory|achievement|level|ephemeral", "expression": "lambda n: ...", "description": "..."}`
+
+Expression patterns:
+- Count-based gains (wood, stone, arrows, etc.): `"expression": "lambda n: n"`
+- Tier-based gains (pickaxe, sword): `"expression": "lambda n: tier_value"` (e.g., `lambda n: 2` for stone pickaxe)
+- Achievements: `"expression": "lambda n: 1"`
+
+Use `achievement:` and `level:` prefixes where applicable.
 
 
 # Formatting
@@ -118,7 +251,13 @@ Finally, complete the following Json dictionary as your output.
 {
 "skill_name": # name of the objective
 "description": # (string) 1-line description of the objective
-"gain": # (str) what the player will gain after applying the skill. 
+"gain": { # structured gains following the schema above
+  "gain_key": {
+    "type": "inventory | achievement | level | ephemeral",
+    "expression": "lambda n: ...",
+    "description": "optional context"
+  }
+}
 }
 ```
         """,
@@ -160,7 +299,7 @@ Explicitly analyze the current skill:
 - What resources are consumed when applying the skill.
 
 ## Previous Skill Analysis
-In a bulleted list, write what each skill gains. The requirements and consumption dictionaries for the current skill must be written solely in terms of the gains of existing skills.
+In a bulleted list, write what each skill gains using the structured gain schema (key + type + expression). The requirements and consumption dictionaries for the current skill must be written solely in terms of the gain keys produced by existing skills.
 
 ## Ephemeral Analysis
 Determine if this skill is ephemeral. A skill is ephemeral if the gain itself is not observable in the inventory. 
@@ -176,7 +315,8 @@ Determine if this skill is ephemeral. A skill is ephemeral if the gain itself is
     - If YES (scales with n): use "lambda n: a*n + 0" format
     - If NO (fixed amount): use "lambda n: 0*n + b" format
 - Requirements do not support 'or'
-- Each key in requirements/consumption must be a key in the gain of an existing skill. 
+- Each key in requirements/consumption must exactly match a gain key from an existing skill (including prefixes like `achievement:` or `level:` when applicable). 
+- Gains for the current skill must use the structured schema: each key maps to `{ "type": ..., "expression": ..., "description": ... }` following the same conventions as the proposal step.
   
   
 # Formatting
@@ -186,7 +326,13 @@ Finally, complete the following Json dictionary as your output.
 "skill_name": , # name of the current skill
 "requirements": , # (dict) total amount needed available using "lambda n: a*n + b" format. Each key must exactly match the key of a gain of a previous skill.
 "consumption": , # (dict) amount consumed using "lambda n: a*n + b" format. Each key must exactly match the key of a gain of a previous skill.
-"gain": , # (dict) a dictionary of what is gained by applying the skill. The gain for the skill goal should be n.
+"gain": { # (dict) structured gains; for count-based gains the expression evaluates to n, for tier/achievement gains use lambda n: target_value
+  "gain_key": {
+    "type": "inventory | achievement | level | ephemeral",
+    "expression": "lambda n: ...",  # For counts: n; For tiers: specific tier value; For achievements: 1
+    "description": "optional"
+  }
+}
 "ephemeral": , # (bool) true if the gain itself is not observable in the inventory, false if the gain appears directly in the inventory
 }
 ```
@@ -223,21 +369,46 @@ class BlockType(Enum):
     LAVA = 14
     PLANT = 15
     RIPE_PLANT = 16
-# Max inventory value is 9, max player intrinsics values are also 9 
+    WALL = 17
+    DARKNESS = 18
+    WALL_MOSS = 19
+    STALAGMITE = 20
+    SAPPHIRE = 21
+    RUBY = 22
+    CHEST = 23
+    FOUNTAIN = 24
+    FIRE_GRASS = 25
+    ICE_GRASS = 26
+    GRAVEL = 27
+    FIRE_TREE = 28
+    ICE_SHRUB = 29
+    ENCHANTMENT_TABLE_FIRE = 30
+    ENCHANTMENT_TABLE_ICE = 31
+    NECROMANCER = 32
+    GRAVE = 33
+    GRAVE2 = 34
+    GRAVE3 = 35
+    NECROMANCER_VULNERABLE = 36
+    
+# Inventory has much larger capacity than Classic version
 @struct.dataclass
 class Inventory:
-    wood: int = 0
-    stone: int = 0
-    coal: int = 0
-    iron: int = 0
-    diamond: int = 0
-    sapling: int = 0
-    wood_pickaxe: int = 0
-    stone_pickaxe: int = 0
-    iron_pickaxe: int = 0
-    wood_sword: int = 0
-    stone_sword: int = 0
-    iron_sword: int = 0
+    wood: int
+    stone: int
+    coal: int
+    iron: int
+    diamond: int
+    sapling: int
+    pickaxe: int  # Tier indicator: 0=none, 1=wood, 2=stone, 3=iron, 4=diamond
+    sword: int  # Tier indicator: 0=none, 1=wood, 2=stone, 3=iron, 4=diamond
+    bow: int
+    arrows: int
+    armour: jnp.ndarray  # Array of 4 armor pieces: [helmet, chestplate, leggings, boots], each 0-2 representing tier
+    torches: int
+    ruby: int
+    sapphire: int
+    potions: jnp.ndarray  # Array of 6 potion types: [red, green, blue, pink, cyan, yellow], each storing count
+    books: int
 
 class Achievement(Enum):
     COLLECT_WOOD = 0
@@ -262,10 +433,55 @@ class Achievement(Enum):
     COLLECT_DIAMOND = 19
     MAKE_IRON_PICKAXE = 20
     MAKE_IRON_SWORD = 21
+    MAKE_ARROW = 22
+    MAKE_TORCH = 23
+    PLACE_TORCH = 24
+    COLLECT_SAPPHIRE = 54
+    COLLECT_RUBY = 59
+    MAKE_DIAMOND_PICKAXE = 60
+    MAKE_DIAMOND_SWORD = 25
+    MAKE_IRON_ARMOUR = 26
+    MAKE_DIAMOND_ARMOUR = 27
+    ENTER_GNOMISH_MINES = 28
+    ENTER_DUNGEON = 29
+    ENTER_SEWERS = 30
+    ENTER_VAULT = 31
+    ENTER_TROLL_MINES = 32
+    ENTER_FIRE_REALM = 33
+    ENTER_ICE_REALM = 34
+    ENTER_GRAVEYARD = 35
+    DEFEAT_GNOME_WARRIOR = 36
+    DEFEAT_GNOME_ARCHER = 37
+    DEFEAT_ORC_SOLIDER = 38
+    DEFEAT_ORC_MAGE = 39
+    DEFEAT_LIZARD = 40
+    DEFEAT_KOBOLD = 41
+    DEFEAT_KNIGHT = 65
+    DEFEAT_ARCHER = 66
+    DEFEAT_TROLL = 42
+    DEFEAT_DEEP_THING = 43
+    DEFEAT_PIGMAN = 44
+    DEFEAT_FIRE_ELEMENTAL = 45
+    DEFEAT_FROST_TROLL = 46
+    DEFEAT_ICE_ELEMENTAL = 47
+    DAMAGE_NECROMANCER = 48
+    DEFEAT_NECROMANCER = 49
+    EAT_BAT = 50
+    EAT_SNAIL = 51
+    FIND_BOW = 52
+    FIRE_BOW = 53
+    LEARN_FIREBALL = 55
+    CAST_FIREBALL = 56
+    LEARN_ICEBALL = 57
+    CAST_ICEBALL = 58
+    OPEN_CHEST = 61
+    DRINK_POTION = 62
+    ENCHANT_SWORD = 63
+    ENCHANT_ARMOUR = 64
 ```
 The reward function is calculated independently at each timestep using these available factors:
 
-- inventory_diff (Inventory): The change in the player's inventory between the current and previous timesteps (-1 for each item used and +1 for each item gained).
+- inventory_diff (Inventory): The change in the player's inventory between the current and previous timesteps. For count fields (wood, stone, coal, etc.), this is +1 per item gained, -1 per item used. For tier fields (pickaxe, sword), this is the tier increase (e.g., +1 when upgrading from wood to stone pickaxe).
 - closest_bocks_changes (numpy.ndarray): The changes in distance to closest blocks of each type from the last timestep to the current timestep. Decreases in distance are positive. If an item has moves from being unseen to seen, the default will be 30-current_distance. E.g. if a table is placed in front of the player, the distance diff will be 29.
 - player_intrinsics (jnp.ndarray): The intrinsic values
 - player_intrinsics_diff (jnp.ndarray): The changes in current intrinsic values from the last timestep to the current timestep.
@@ -284,50 +500,17 @@ Given the following skill, design the reward function for the Skill `$db.current
 $db.current.skill_with_consumption$
 ```
 
-# Steps
-Explicitly complete the following steps before arriving at your final formatted output
-0. Analyze Skill Gains and identify appropriate reward factors:
-   - What is the core objective of this subtask?
-   - What specific behaviors or outcomes need to be rewarded?
-   - For each available factor, determine if it can provide meaningful feedback for the required behaviors
-   - Remove any factors that are irrelevant to the subtask objectives or should not be used.
-   - Assume all requirements for the skill has been met before the skill is applied.
-   List the remaining factors that will be analyzed in subsequent steps.
-1. Analyze each factor's per-timestep behavior, responding to each question explicitly:
-   - How does the raw factor behave at each individual timestep?
-   - What does a positive vs negative value mean at a single timestep?
-   - What is measured when we use this raw factor as a direct reward?
-   - Write out a sequence of timestep values for a potential reward hacking attempt. Sum these values.
-   - Based on the sequence sum: Does the reward cycling result in positive net reward? If so, state reward hacking is possible since the agent can repeat this cycle indefinitely for unbounded reward. If the cycle results in zero or negative net reward, state the raw factor naturally prevents reward hacking since repeating the cycle cannot generate unbounded reward.
-   - Write the exact transformation: If we concluded the raw factor naturally prevents reward hacking, write the factor name exactly as it appears in the available factors (e.g., "Transform = inventory_diff"). Otherwise, write the minimal equation required and explain why it's necessary based on the sequence analysis.
+# Design Approach
+Return the raw factor value that measures the skill's gain. Requirements and consumption are enforced elsewhere.
 
-2. Filter out factors with no obvious non-hackable reward functions or those that are not relevant to the task.
-
-3. Classify the remaining factors in to dense and sparse rewards. The chosen sparse reward should be a single factor that best represents the main objective of the subtask. Justify your choice.
-4. Design a minimalistic sparse reward formula:
-   - Use the raw factor directly if it was shown to naturally prevent reward hacking
-   - Include only the minimum operations needed for the reward signal
-   - Verify the formula matches your timestep sequence analysis from step 1
-
-5. Design a dense reward formula:
-   - For each factor proven safe in step 1, include it directly 
-   - If multiple factors are valid, combine them through simple addition
-   - No additional transformations beyond what was proven necessary in step 1
-   - For each factor included, include a coefficient between 0.0 and 1.0 such that the the magnitude of sparse reward over-powers dense reward and output in the requested format.
-   - The sum of the sparse reward across timesteps should be greater then the sum of the dense rewards. For example, if considering distance, if the max distance is 30,30, then sqrt(30^2+30^2) = 42, so for the sum of the dense distance reward to be less then a sparse reward of 1, the coefficent would need to be less then 1/24 = 0.02 or lets say 0.01 or less.
-   - Write "NA" if no dense reward is needed
-
-6. Write both rewards into mathematical formula, and double-check for redundancy
-
-# Note
-- The optimization stops when completion critiera is met, so no more rewards will be provided after completion.
-
-If no dense reward function is possible or needed for this task, simply state NA.
+1. Identify the factor measuring the gain
+2. Sparse reward: return the raw factor (can be positive, negative, or zero)
+3. Dense reward: optional raw factor that provides denser feedback (can be positive, negative, or zero) toward the gain, scaled by coefficient ≤ 0.01, or "NA"
 
 ```json
 {
-"sparse_reward_only_function": # (str) Minimal reward pseudocode
-"dense_reward_function": # (str) Dense reward pseudocode, "NA" if not available
+"sparse_reward_only_function": # (str) "return <factor>"
+"dense_reward_function": # (str) "return <coefficient> * <dense_factor>", or "NA"
 }
 ```
         """,
@@ -359,21 +542,46 @@ class BlockType(Enum):
     LAVA = 14
     PLANT = 15
     RIPE_PLANT = 16
-# Max inventory value is 9, max player intrinsics values are also 9 
+    WALL = 17
+    DARKNESS = 18
+    WALL_MOSS = 19
+    STALAGMITE = 20
+    SAPPHIRE = 21
+    RUBY = 22
+    CHEST = 23
+    FOUNTAIN = 24
+    FIRE_GRASS = 25
+    ICE_GRASS = 26
+    GRAVEL = 27
+    FIRE_TREE = 28
+    ICE_SHRUB = 29
+    ENCHANTMENT_TABLE_FIRE = 30
+    ENCHANTMENT_TABLE_ICE = 31
+    NECROMANCER = 32
+    GRAVE = 33
+    GRAVE2 = 34
+    GRAVE3 = 35
+    NECROMANCER_VULNERABLE = 36
+    
+# Inventory has much higher capacities than Classic version
 @struct.dataclass
 class Inventory:
-    wood: int = 0
-    stone: int = 0
-    coal: int = 0
-    iron: int = 0
-    diamond: int = 0
-    sapling: int = 0
-    wood_pickaxe: int = 0
-    stone_pickaxe: int = 0
-    iron_pickaxe: int = 0
-    wood_sword: int = 0
-    stone_sword: int = 0
-    iron_sword: int = 0
+    wood: int
+    stone: int
+    coal: int
+    iron: int
+    diamond: int
+    sapling: int
+    pickaxe: int  # Tier indicator: 0=none, 1=wood, 2=stone, 3=iron, 4=diamond
+    sword: int  # Tier indicator: 0=none, 1=wood, 2=stone, 3=iron, 4=diamond
+    bow: int
+    arrows: int
+    armour: jnp.ndarray  # Array of 4 armor pieces: [helmet, chestplate, leggings, boots], each 0-2 representing tier
+    torches: int
+    ruby: int
+    sapphire: int
+    potions: jnp.ndarray  # Array of 6 potion types: [red, green, blue, pink, cyan, yellow], each storing count
+    books: int
 
 class Achievement(Enum):
     COLLECT_WOOD = 0
@@ -398,6 +606,51 @@ class Achievement(Enum):
     COLLECT_DIAMOND = 19
     MAKE_IRON_PICKAXE = 20
     MAKE_IRON_SWORD = 21
+    MAKE_ARROW = 22
+    MAKE_TORCH = 23
+    PLACE_TORCH = 24
+    COLLECT_SAPPHIRE = 54
+    COLLECT_RUBY = 59
+    MAKE_DIAMOND_PICKAXE = 60
+    MAKE_DIAMOND_SWORD = 25
+    MAKE_IRON_ARMOUR = 26
+    MAKE_DIAMOND_ARMOUR = 27
+    ENTER_GNOMISH_MINES = 28
+    ENTER_DUNGEON = 29
+    ENTER_SEWERS = 30
+    ENTER_VAULT = 31
+    ENTER_TROLL_MINES = 32
+    ENTER_FIRE_REALM = 33
+    ENTER_ICE_REALM = 34
+    ENTER_GRAVEYARD = 35
+    DEFEAT_GNOME_WARRIOR = 36
+    DEFEAT_GNOME_ARCHER = 37
+    DEFEAT_ORC_SOLIDER = 38
+    DEFEAT_ORC_MAGE = 39
+    DEFEAT_LIZARD = 40
+    DEFEAT_KOBOLD = 41
+    DEFEAT_KNIGHT = 65
+    DEFEAT_ARCHER = 66
+    DEFEAT_TROLL = 42
+    DEFEAT_DEEP_THING = 43
+    DEFEAT_PIGMAN = 44
+    DEFEAT_FIRE_ELEMENTAL = 45
+    DEFEAT_FROST_TROLL = 46
+    DEFEAT_ICE_ELEMENTAL = 47
+    DAMAGE_NECROMANCER = 48
+    DEFEAT_NECROMANCER = 49
+    EAT_BAT = 50
+    EAT_SNAIL = 51
+    FIND_BOW = 52
+    FIRE_BOW = 53
+    LEARN_FIREBALL = 55
+    CAST_FIREBALL = 56
+    LEARN_ICEBALL = 57
+    CAST_ICEBALL = 58
+    OPEN_CHEST = 61
+    DRINK_POTION = 62
+    ENCHANT_SWORD = 63
+    ENCHANT_ARMOUR = 64
 
 #when indexing an enum make sure to use .value
 
@@ -405,7 +658,7 @@ class Achievement(Enum):
 
 def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev, player_intrinsics, player_intrinsics_diff, achievements, n):
     \"\"\"
-    Determines whether Task `$db.current.skill_name$` is complete.
+    Determines whether Task `$db.current.skill_name$` is complete by checking the primary gain from the gain dictionary.
     Do not call external functions or make any assumptions beyond the information given to you.
 
     Args:
@@ -416,13 +669,13 @@ def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev,
         # to get the l2 distance of the agent from the closest diamond for example would be jnp.linalg.norm(closest_blocks[BlockType.DIAMOND.value, :, 0]), closest_bocks_changes = l2dist(closest_blocks_prev) - l2dist(closest_blocks)
         closest_blocks_prev (numpy.ndarray): A 3D array of shape (len(BlockType), 2, K) representing the K closest blocks of each type in the previous timestep. Default values are (30, 30) for unseen blocks.
         #default of 30,30 if less then k seen, ordered by distance (so :,:,0 would be the closest of each block type
-        player_intrinsics (jnp.ndarray): An len 4 array representing the player's health, food, drink, and energy levels
-        player_intrinsics_diff (jnp.ndarray): An len 4 array representing the change in the player's health, food, drink, and energy levels
-        achievements (jnp.ndarray): A 1D array (22,) of achievements, where each element is an boolean indicating the corresponding achievement has been completed.
-        n (int): The target amount to reach in inventory for the main gain item.
+        player_intrinsics (jnp.ndarray): An len 5 array representing the player's health, food, drink, energy, and mana levels
+        player_intrinsics_diff (jnp.ndarray): An len 5 array representing the change in the player's health, food, drink, energy, and mana levels
+        achievements (jnp.ndarray): A 1D array (67,) of achievements, where each element is an boolean indicating the corresponding achievement has been completed.
+        n (int): The count parameter (use for count-based gains like collecting wood; ignore for tier-based gains or achievements that have fixed targets).
 
     Returns:
-        bool: True if the main gain item in inventory has reached the target amount n, False otherwise.
+        bool: True if the primary gain condition is satisfied, False otherwise.
     \"\"\"
     return TODO
 
@@ -437,11 +690,12 @@ def task_reward(inventory_diff, closest_blocks, closest_blocks_prev, player_intr
         closest_blocks (numpy.ndarray): A 3D array of shape (len(BlockType), 2, K) representing the K closest blocks of each type, 
         #default of 30,30 if less then k seen, ordered by distance (so :,:,0 would be the closest of each block type.
         #Since the environment is a 2d gridworld, an object next to the player will have a distance of 1.
+        # to get the l2 distance of the agent from the closest diamond for example would be jnp.linalg.norm(closest_blocks[BlockType.DIAMOND.value, :, 0]), closest_bocks_changes = l2dist(closest_blocks_prev) - l2dist(closest_blocks)
         closest_blocks_prev (numpy.ndarray): A 3D array of shape (len(BlockType), 2, K) representing the K closest blocks of each type in the previous timestep. Default values are (30, 30) for unseen blocks.
         #default of 30,30 if less then k seen, ordered by distance (so :,:,0 would be the closest of each block type
         health_penalty (float): The penalty for losing health. Negative when loosing health and positive when regaining health.
-        player_intrinsics_diff (jnp.ndarray): An len 4 array representing the change in the player's health, food, drink, and energy levels
-        achievements_diff (jnp.ndarray): A 1D array (22,) of achievements, where each element is an boolean indicating whether the achievement was completed in the last timestep. If the achievement was already completed previously, it will not indicate the achievement was completed again.
+        player_intrinsics_diff (jnp.ndarray): An len 5 array representing the change in the player's health, food, drink, energy, and mana levels
+        achievements_diff (jnp.ndarray): A 1D array (67,) of achievements, where each element is an boolean indicating whether the achievement was completed in the last timestep. If the achievement was already completed previously, it will not indicate the achievement was completed again.
 
     Returns:
         float: Reward for RL agent
@@ -483,7 +737,7 @@ $db.current.num_skills$
 ## Implementation Guidelines:
 
 For `task_is_done`: 
-- Identify the main gain item from the skill's "gain" dictionary (the item with the highest gain value)
+- Identify the main gain entry from the structured "gain" dictionary (the entry representing the primary objective, typically the one whose expression evaluates to `n` for the produced item or predicate)
 - Check if the current inventory amount of that main gain item is >= n (the target amount)
 - Return True when the target amount is reached, False otherwise
 - Use inventory.{item_name} to access inventory amounts (e.g., inventory.wood, inventory.stone)
@@ -500,8 +754,8 @@ No need to add coefficents to rewards, for example, no need for 10 * inventory_d
 Return all three functions in a single code block, don't seperate it into 3.
 No need to return the docstrings.
 Your code will be pasted into a file that already has the following imports. Do not add any additional imports.
-from craftax.craftax_classic.constants import *
-from craftax.craftax_classic.envs.craftax_state import Inventory
+from craftax.craftax.constants import *
+from craftax.craftax.craftax_state import Inventory
 import jax
         """,
         "dep": [],

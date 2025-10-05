@@ -13,11 +13,20 @@ def create_log_dict(info, config):
         "episode_return": info["returned_episode_returns"],
         "episode_length": info["returned_episode_lengths"],
     }
-    for i, state in enumerate(info["state_rates"]):
-        to_log[f"state_rate_{i}"] = state
+    if "state_rates" in info:
+        for i, state in enumerate(info["state_rates"]):
+            to_log[f"state_rate_{i}"] = state
+    if "reached_state" in info:
+        for i, state in enumerate(info["reached_state"]):
+            to_log[f"state_{i}_reached_prob"] = state
 
-    for i, state in enumerate(info["reached_state"]):
-        to_log[f"state_{i}_reached_prob"] = state
+    # Add transition success metrics
+    if "transition_success_rate" in info:
+        to_log["transition_success_rate"] = info["transition_success_rate"]
+    if "failure_transitions" in info:
+        to_log["failure_transitions"] = info["failure_transitions"] 
+    if "success_transitions" in info:
+        to_log["success_transitions"] = info["success_transitions"]
 
     sum_achievements = 0
     for k, v in info.items():

@@ -1,37 +1,75 @@
 import pickle
-from flowrl.llm.craftax_classic.llm import generate_graph
-from flowrl.llm.craftax_classic.generate_code import (
-    validate_code,
-    generate_validated_py,
-)
-
-# from craftax.craftax_classic.constants import BlockType
-import shutil
 from pathlib import Path
 import json
 import copy
-
-# from flowrl.utils.test import explain_trajectory, render_video
-# from flowrl.utils.test import gen_frames_hierarchical
 import os
-import yaml
 
 from flowrl.utils.trajectory_explanation import (
     explain_trajectory,
 )
 from flowrl.skill_dependency_resolver import SkillDependencyResolver
+from flowrl.skill_depenency_resolver_new import (
+    SymbolicSkillDependencyResolver,
+    configure_symbolic_state_module,
+)
 
 
 class Flow:
     def __init__(self, args):
         self.args = args
         self.graph_path = Path(args.graph_path)
+        self.skills = {}  # Initialize skills dictionary before any method calls
         if args.env_name == "Craftax-Classic-Symbolic-v1":
+            from flowrl.llm.craftax_classic.llm import generate_graph
+            from flowrl.llm.craftax_classic.generate_code import (
+                validate_code,
+                generate_validated_py,
+            )
+            self.validate_code = validate_code
+            self.generate_validated_py = generate_validated_py
             self.db, self.graph, self.inventory_graph, self.reuse_graph = (
                 generate_graph(return_inventory_graph=True)
             )
+            self.use_frontier_based_prompts = False  # Keep classic behavior
+            self.dependency_resolver_cls = SkillDependencyResolver
+        elif "Fabrax" in args.env_name:
+            # For Fabrax, use frontier-based approach with fabrax-specific modules
+            from flowrl.llm.fabrax.llm import generate_graph
+            from flowrl.llm.fabrax.generate_code import (
+                validate_code,
+                generate_validated_py,
+            )
+            self.validate_code = validate_code
+            self.generate_validated_py = generate_validated_py
+            self.db, self.graph, self.inventory_graph, self.reuse_graph = (
+                generate_graph(return_inventory_graph=True)
+            )
+            self.use_frontier_based_prompts = True  # Enable new frontier features
+            configure_symbolic_state_module("flowrl.llm.fabrax.symbolic_state")
+            self.dependency_resolver_cls = SymbolicSkillDependencyResolver
+
+            # Initialize frontier summary
+            self.db["frontier_summary"] = self.generate_frontier_summary_from_skills()
+        elif "Craftax" in args.env_name:
+            # For full Craftax, use frontier-based approach
+            from flowrl.llm.craftax.llm import generate_graph
+            from flowrl.llm.craftax.generate_code import (
+                validate_code,
+                generate_validated_py,
+            )
+            self.validate_code = validate_code
+            self.generate_validated_py = generate_validated_py
+            self.db, self.graph, self.inventory_graph, self.reuse_graph = (
+                generate_graph(return_inventory_graph=True)
+            )
+            self.use_frontier_based_prompts = True  # Enable new frontier features
+            configure_symbolic_state_module("flowrl.llm.craftax.symbolic_state")
+            self.dependency_resolver_cls = SymbolicSkillDependencyResolver
+
+            # Initialize frontier summary
+            self.db["frontier_summary"] = self.generate_frontier_summary_from_skills()
         else:
-            assert 0, f"Not Implemented"
+            assert 0, f"Environment '{args.env_name}' not implemented"
 
         self.current_i = args.current_i  # Current iteration (not node count)
         self.previous_i = args.previous_i
@@ -117,6 +155,10 @@ class Flow:
         """Add a skill to the skills dictionary"""
         self.skills[skill_name] = skill_data
 
+        # Update frontier summary if using frontier-based prompts
+        if self.use_frontier_based_prompts:
+            self.db["frontier_summary"] = self.generate_frontier_summary_from_skills()
+
     def next_skill(self):
         """Generate and validate a complete skill from the graph"""
         from flowrl.llm.craftax_classic.after_queries import RestartGraphException
@@ -126,7 +168,7 @@ class Flow:
             try:
                 evaluated = self.graph.evaluate()
                 generated_code = evaluated[list(evaluated.keys())[-1]]
-                functions, error = validate_code(generated_code)
+                functions, error = self.validate_code(generated_code)
                 if error != "":
                     print(f"Error generating: {error}")
             except RestartGraphException as e:
@@ -161,13 +203,30 @@ class Flow:
         """
         Build a dependency graph for the target skill by transforming requirements
         at each level until all dependencies are satisfied.
-        
+
         Args:
             target_skill_name: Name of the skill to build dependencies for
         """
-        resolver = SkillDependencyResolver(self.skills)
+        # Use correct inventory capacity based on environment:
+        # - Full Craftax: 99 items per slot (confirmed in game_logic_utils.py)
+        # - Fabrax: 9 items per slot (confirmed in fabrax/game_logic.py)
+        # - Craftax Classic: 9 items per slot (default)
+        if "Craftax-Symbolic-v1" in self.args.env_name or "Craftax-Pixels-v1" in self.args.env_name:
+            max_capacity = 99  # Full Craftax
+        elif "Fabrax" in self.args.env_name or "Classic" in self.args.env_name:
+            max_capacity = 9   # Fabrax and Craftax Classic
+        else:
+            max_capacity = 9   # Default for unknown environments
+
+        resolver_cls = getattr(self, "dependency_resolver_cls", SkillDependencyResolver)
+        resolver_kwargs = {"max_inventory_capacity": max_capacity}
+
+        if issubclass(resolver_cls, SymbolicSkillDependencyResolver):
+            resolver = resolver_cls(self.skills, **resolver_kwargs)
+        else:
+            resolver = resolver_cls(self.skills, **resolver_kwargs)
         self.execution_order = resolver.resolve_dependencies(target_skill_name)
-        print(f"Execution order for skill '{target_skill_name}': {self.execution_order}")
+        print(f"Execution order for skill '{target_skill_name}' (max_capacity={max_capacity}): {self.execution_order}")
 
     def write_code(self):
         """
@@ -189,10 +248,10 @@ class Flow:
             if skill_name in self.skills:
                 skill_data = self.skills[skill_name]
                 functions = skill_data.get("functions", [])
-                
+
                 if len(functions) >= 3:
                     # generate_validated_py expects exactly 3 functions: [task_is_done, task_reward, task_network_number]
-                    generate_validated_py(functions[:3], module_path, task_index, n=count)
+                    self.generate_validated_py(functions[:3], module_path, task_index, n=count)
                     print(f"Added task_{task_index}: {skill_name} (n={count})")
                 else:
                     print(f"Warning: Skill '{skill_name}' has {len(functions)} functions, expected 3")
@@ -222,11 +281,22 @@ class Flow:
         # Add skill to skills database with complete skill data
         self.db["skills"][skill_name] = skill_data
 
+        # Update frontier summary if using frontier-based prompts
+        if self.use_frontier_based_prompts:
+            self.db["frontier_summary"] = self.generate_frontier_summary_from_skills()
+
     def explain_trajectory(self, env_states, actions, goal_state):
         """Explain the trajectory and update skill based on actual execution"""
         try:
+            # Determine game type based on environment name
+            if self.args.env_name == "Craftax-Classic-Symbolic-v1":
+                game = "craftax_classic"
+            elif "Fabrax" in self.args.env_name:
+                game = "fabrax"
+            else:
+                game = "craftax"
             self.db["example_trajectory"] = explain_trajectory(
-                env_states, actions, start_state=goal_state
+                env_states, actions, start_state=goal_state, game=game
             )
         except:
             breakpoint()
@@ -244,6 +314,21 @@ class Flow:
         # Update the skill in self.skills based on the analysis
         if "skill_update_results" in self.db["current"]:
             skill_updates = self.db["current"]["skill_update_results"]
+            if "updated_gain" in skill_updates:
+                try:
+                    from flowrl.llm.craftax.after_queries import normalize_gain_schema
+
+                    normalized_gain = normalize_gain_schema(
+                        skill_updates.get("updated_gain", {}),
+                        ValueError,
+                        context="trajectory_analysis.updated_gain",
+                    )
+                    skill_updates["updated_gain"] = normalized_gain
+                except Exception as exc:
+                    print(
+                        "Warning: could not normalize updated_gain during trajectory analysis:",
+                        exc,
+                    )
             if skill_name in self.skills:
                 # Update the skill_with_consumption in the stored skill
                 self.skills[skill_name]["skill_with_consumption"]["requirements"] = skill_updates.get("updated_requirements", {})
@@ -364,3 +449,29 @@ class Flow:
             del self._checkpoints[checkpoint_name]
             print(f"Cleaned up checkpoint: {checkpoint_name}")
 
+    def generate_frontier_summary_from_skills(self):
+        """
+        Generate a summary of the current symbolic frontier based on existing skills.
+        Returns a human-readable summary for prompt use rather than explicit state enumeration.
+        """
+        if not self.use_frontier_based_prompts:
+            return "Frontier-based prompts disabled for this environment"
+
+        # Import symbolic state functions
+        from flowrl.llm.craftax.symbolic_state import compute_frontier_summary
+
+        if not self.skills:
+            return """Initial state: No skills learned yet.
+Available resources: None (starting from empty inventory)
+Achievable goals: Only basic actions like movement and simple interactions
+Next frontier: Learn basic resource collection skills (wood, stone, etc.)"""
+
+        try:
+            # Use correct inventory capacity based on environment
+            max_capacity = 99 if "Craftax-Symbolic-v1" in self.args.env_name else 9
+
+            # Use the existing frontier summary function
+            return compute_frontier_summary(self.skills, max_capacity)
+
+        except Exception as e:
+            return f"Error generating frontier summary: {str(e)}\nFalling back to basic skill list: {list(self.skills.keys())}"
