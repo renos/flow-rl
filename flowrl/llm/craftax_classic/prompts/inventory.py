@@ -16,7 +16,7 @@ $db.current.skill_with_consumption$
 
 Existing Skills (for requirements validation):
 ```
-$db.skills$
+$db.skills_without_code$
 ```
 
 Trajectory Data:

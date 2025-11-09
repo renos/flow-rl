@@ -37,6 +37,10 @@ inventory = state.inventory
 inventory_diff = state.inventory_diff
 closest_blocks = state.closest_blocks
 closest_blocks_prev = state.closest_blocks_prev
+player_level = state.player_level
+player_level_diff = jnp.array(0)
+monsters_killed = state.monsters_killed
+monsters_killed_diff = jnp.zeros_like(monsters_killed)
 health_penalty = 0
 achievements = state.achievements
 achievements_diff = state.achievements_diff
@@ -79,6 +83,8 @@ def verify_function(functions):
             inventory_diff,
             closest_blocks,
             closest_blocks_prev,
+            player_level,
+            monsters_killed,
             player_intrinsics,
             intrinsics_diff,
             achievements,
@@ -90,11 +96,15 @@ def verify_function(functions):
 
         batched_n = jnp.repeat(jnp.array([1]), batch_size, axis=0)
         
+        batched_player_level = jnp.repeat(jnp.array([player_level]), batch_size, axis=0)
+        batched_monsters_killed = jnp.repeat(monsters_killed[None], batch_size, axis=0)
         vmapped_is_task_done(
             batched_inventory,
             batched_inventory_diff,
             batched_closest_blocks,
             batched_closest_blocks_prev,
+            batched_player_level,
+            batched_monsters_killed,
             batched_player_intrinsics,
             batched_intrinsics_diff,
             batched_achievements,
@@ -109,6 +119,8 @@ def verify_function(functions):
             inventory_diff,
             closest_blocks,
             closest_blocks_prev,
+            player_level_diff,
+            monsters_killed_diff,
             intrinsics_diff,
             achievements_diff,
             health_penalty,
@@ -119,10 +131,14 @@ def verify_function(functions):
             jnp.array([health_penalty]), batch_size, axis=0
         )
 
+        vmapped_player_level_diff = jnp.repeat(jnp.array([player_level_diff]), batch_size, axis=0)
+        vmapped_monsters_killed_diff = jnp.repeat(monsters_killed_diff[None], batch_size, axis=0)
         vmapped_task_reward(
             batched_inventory_diff,
             batched_closest_blocks,
             batched_closest_blocks_prev,
+            vmapped_player_level_diff,
+            vmapped_monsters_killed_diff,
             batched_intrinsics_diff,
             batched_achievements_diff,
             batched_health_penalty,
@@ -130,7 +146,6 @@ def verify_function(functions):
         task_reward_sucessful = True
     except Exception as e:
         task_reward_exception = str(e)
-        breakpoint()
 
     return (
         is_task_done_sucessful,

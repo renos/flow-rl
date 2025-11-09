@@ -12,6 +12,7 @@ from flowrl.skill_depenency_resolver_new import (
     SymbolicSkillDependencyResolver,
     configure_symbolic_state_module,
 )
+from flowrl.llm.exceptions import ContinueSkillException
 
 
 class Flow:
@@ -19,6 +20,10 @@ class Flow:
         self.args = args
         self.graph_path = Path(args.graph_path)
         self.skills = {}  # Initialize skills dictionary before any method calls
+
+        # Get LLM name from args, or use None to get default
+        llm_name = getattr(args, 'llm_name', None)
+
         if args.env_name == "Craftax-Classic-Symbolic-v1":
             from flowrl.llm.craftax_classic.llm import generate_graph
             from flowrl.llm.craftax_classic.generate_code import (
@@ -28,7 +33,7 @@ class Flow:
             self.validate_code = validate_code
             self.generate_validated_py = generate_validated_py
             self.db, self.graph, self.inventory_graph, self.reuse_graph = (
-                generate_graph(return_inventory_graph=True)
+                generate_graph(return_inventory_graph=True, llm_name=llm_name)
             )
             self.use_frontier_based_prompts = False  # Keep classic behavior
             self.dependency_resolver_cls = SkillDependencyResolver
@@ -42,7 +47,7 @@ class Flow:
             self.validate_code = validate_code
             self.generate_validated_py = generate_validated_py
             self.db, self.graph, self.inventory_graph, self.reuse_graph = (
-                generate_graph(return_inventory_graph=True)
+                generate_graph(return_inventory_graph=True, llm_name=llm_name)
             )
             self.use_frontier_based_prompts = True  # Enable new frontier features
             configure_symbolic_state_module("flowrl.llm.fabrax.symbolic_state")
@@ -60,7 +65,7 @@ class Flow:
             self.validate_code = validate_code
             self.generate_validated_py = generate_validated_py
             self.db, self.graph, self.inventory_graph, self.reuse_graph = (
-                generate_graph(return_inventory_graph=True)
+                generate_graph(return_inventory_graph=True, llm_name=llm_name)
             )
             self.use_frontier_based_prompts = True  # Enable new frontier features
             configure_symbolic_state_module("flowrl.llm.craftax.symbolic_state")
@@ -75,6 +80,7 @@ class Flow:
         self.previous_i = args.previous_i
 
         self.skills = {}  # Dictionary of skill_name -> skill_data
+        self.training_skills = {}  # Skills currently being trained in parallel
         self.old_skills = None
         
         # Checkpoint system
@@ -161,8 +167,24 @@ class Flow:
 
     def next_skill(self):
         """Generate and validate a complete skill from the graph"""
-        from flowrl.llm.craftax_classic.after_queries import RestartGraphException
-        self.db['skills_without_code'] = {key: value["skill_with_consumption"] for key, value in self.db['skills'].items()}
+        # Handle RestartGraphException from either Classic or Craftax modules
+        def _is_restart_exception(exc: Exception) -> bool:
+            return exc.__class__.__name__ == 'RestartGraphException'
+        # Expose existing skills without code, but include metrics if available
+        skills_wo = {}
+        for key, value in self.db.get('skills', {}).items():
+            swc = value.get("skill_with_consumption", {})
+            entry = dict(swc) if isinstance(swc, dict) else {}
+            metrics = value.get("metrics")
+            if metrics:
+                entry["metrics"] = metrics
+            skills_wo[key] = entry
+        self.db['skills_without_code'] = skills_wo
+
+        # Training skills typically lack stable metrics; keep to SWC only
+        self.db['training_skills_without_code'] = {
+            key: value.get("skill_with_consumption", {}) for key, value in self.training_skills.items()
+        }
         error = "Not generated yet"
         while error != "":
             try:
@@ -171,11 +193,26 @@ class Flow:
                 functions, error = self.validate_code(generated_code)
                 if error != "":
                     print(f"Error generating: {error}")
-            except RestartGraphException as e:
-                print(f"Graph restart requested: {e}")
-                print("Restarting graph evaluation from next_task...")
-                # Continue the loop to re-evaluate the graph
-                continue
+            except Exception as e:
+                if _is_restart_exception(e):
+                    print(f"Graph restart requested: {e}")
+                    print("Restarting graph evaluation from next_task...")
+                    # Continue the loop to re-evaluate the graph
+                    continue
+                # Continuation directive: propagate decision and exit without creating a new skill
+                if isinstance(e, ContinueSkillException):
+                    print(f"LLM decision: continue training '{e.decision.skill_name}' for {e.decision.extra_timesteps} timesteps")
+                    self.db.setdefault("current", {})
+                    # Preserve any decision the after_query wrote; otherwise use from exception
+                    if not self.db["current"].get("decision"):
+                        self.db["current"]["decision"] = {
+                            "action": e.decision.action,
+                            "skill_name": e.decision.skill_name,
+                            "extra_timesteps": e.decision.extra_timesteps,
+                        }
+                    # Return placeholders; caller will act on decision
+                    return "__CONTINUE__", {}
+                raise
         
         # Save the graph evaluation
         txt_path = os.path.join(self.graph_path / str(self.current_i), "graph_eval.txt")
@@ -194,10 +231,73 @@ class Flow:
             "skill_name": skill_name,
             "skill_with_consumption": skill_with_consumption,
             "functions": functions,
+            "code": generated_code,
             "iteration": self.current_i
         }
-        
+
+        # In parallel mode, track newly generated skills as "training" until completion
+        self.training_skills[skill_name] = skill_data
+
         return skill_name, skill_data
+
+    def on_skill_complete(self, skill_name):
+        """Move skill from training to completed when training finishes"""
+        if skill_name in self.training_skills:
+            skill_data = self.training_skills.pop(skill_name)
+            self.skills[skill_name] = skill_data
+            self.db["skills"][skill_name] = skill_data
+            print(f"Skill '{skill_name}' completed and moved to skills database")
+
+    def check_frontier_blocked(self, skill_name: str, skill_data: dict) -> bool:
+        """
+        Check if skill depends on currently training skills (frontier blocking).
+
+        Uses frontier verification with ONLY completed skills. If the skill is not feasible
+        with completed skills alone, it must depend on training skills.
+
+        Args:
+            skill_name: Name of the skill to check
+            skill_data: Skill data dictionary with skill_with_consumption
+
+        Returns:
+            True if frontier is blocked (skill depends on training skills), False otherwise
+        """
+        # Only check for environments with frontier-based prompts
+        if not self.use_frontier_based_prompts:
+            return False
+
+        try:
+            from flowrl.llm.craftax.symbolic_state import verify_skill
+
+            # Determine max capacity based on environment
+            if "Craftax-Symbolic-v1" in self.args.env_name or "Craftax-Pixels-v1" in self.args.env_name:
+                max_capacity = 99
+            elif "Fabrax" in self.args.env_name or "Classic" in self.args.env_name:
+                max_capacity = 9
+            else:
+                max_capacity = 9
+
+            # Check feasibility using ONLY completed skills
+            _, is_feasible_with_completed = verify_skill(
+                skill_name,
+                skill_data.get("skill_with_consumption", skill_data),
+                self.skills,  # Only completed skills, NOT training_skills
+                max_capacity
+            )
+
+            # If NOT feasible with completed skills, must depend on training skills
+            frontier_blocked = not is_feasible_with_completed
+
+            if frontier_blocked:
+                print(f"Frontier blocked: '{skill_name}' depends on currently training skills")
+            else:
+                print(f"Frontier open: '{skill_name}' is independent of training skills")
+
+            return frontier_blocked
+
+        except Exception as e:
+            print(f"Error checking frontier blocking: {e}")
+            return False  # Default to not blocked on error
 
     def build_skill_dependency_graph(self, target_skill_name):
         """

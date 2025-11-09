@@ -95,6 +95,7 @@ def explain_inventory_changes(subseq, actions, game="craftax"):
     ]:
         if hasattr(subseq, field_name):
             level_fields.append(field_name)
+    has_monsters_killed = hasattr(subseq, "monsters_killed")
 
     # Get all item names from the inventory structure
     item_names = inventory_diff.__dict__.keys()
@@ -170,6 +171,22 @@ def explain_inventory_changes(subseq, actions, game="craftax"):
                 field_readable = field_name.replace("player_", "").replace("_", " ")
                 timestep_changes.append(
                     f"Increased {field_readable} to {int(curr_val)}"
+                )
+
+        # Special case: descending floors in Craftax – annotate with monsters_killed on previous floor
+        if has_monsters_killed and "player_level" in level_fields and t > 0:
+            lvl_vals = getattr(subseq, "player_level")
+            prev_lvl = int(lvl_vals[t - 1])
+            curr_lvl = int(lvl_vals[t])
+            if curr_lvl > prev_lvl:
+                try:
+                    mk_row = subseq.monsters_killed[t - 1]
+                    # Support both 1D per-level vector and flattened arrays
+                    kills_prev_floor = int(mk_row[prev_lvl]) if hasattr(mk_row, "__getitem__") else int(mk_row)
+                except Exception:
+                    kills_prev_floor = -1
+                timestep_changes.append(
+                    f"Descended to level {curr_lvl} (monsters_killed on level {prev_lvl}: {kills_prev_floor})"
                 )
 
         # If there were any changes at this timestep, add an explanation with the action

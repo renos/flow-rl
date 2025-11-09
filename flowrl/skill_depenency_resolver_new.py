@@ -19,6 +19,7 @@ SymbolicState = None
 SkillOperator = None
 convert_skill_to_operator = None
 SYMBOLIC_STATE_AVAILABLE = False
+TIERED_INVENTORY_ITEMS = set()  # Environment-specific tiered items
 
 
 def _load_default_symbolic_module() -> None:
@@ -41,7 +42,7 @@ def _load_default_symbolic_module() -> None:
 def configure_symbolic_state_module(module: Union[str, object]) -> None:
     """Configure symbolic state helpers from the provided module or module path."""
 
-    global SymbolicState, SkillOperator, convert_skill_to_operator, SYMBOLIC_STATE_AVAILABLE
+    global SymbolicState, SkillOperator, convert_skill_to_operator, SYMBOLIC_STATE_AVAILABLE, TIERED_INVENTORY_ITEMS
 
     if isinstance(module, str):
         module = importlib.import_module(module)
@@ -49,6 +50,11 @@ def configure_symbolic_state_module(module: Union[str, object]) -> None:
     SymbolicState = getattr(module, "SymbolicState", None)
     SkillOperator = getattr(module, "SkillOperator", None)
     convert_skill_to_operator = getattr(module, "convert_skill_to_operator", None)
+
+    # Load environment-specific tiered inventory items (Craftax has pickaxe/sword, Fabrax doesn't)
+    TIERED_INVENTORY_ITEMS = getattr(module, "TIERED_INVENTORY_ITEMS", set())
+    if not isinstance(TIERED_INVENTORY_ITEMS, set):
+        TIERED_INVENTORY_ITEMS = set(TIERED_INVENTORY_ITEMS) if TIERED_INVENTORY_ITEMS else set()
 
     SYMBOLIC_STATE_AVAILABLE = all(
         attr is not None for attr in (SymbolicState, SkillOperator, convert_skill_to_operator)
@@ -62,8 +68,6 @@ def configure_symbolic_state_module(module: Union[str, object]) -> None:
 
 # Load default bindings at import time for backward compatibility
 _load_default_symbolic_module()
-
-TIERED_INVENTORY_ITEMS = {"pickaxe", "sword"}
 
 
 class Node:
@@ -98,7 +102,7 @@ class Node:
 
 
 class SkillDependencyResolver:
-    def __init__(self, skills, max_inventory_capacity=9, initial_state=None):
+    def __init__(self, skills, max_inventory_capacity=99, initial_state=None):
         """
         Initialize the resolver with a dictionary of skills.
 
@@ -231,6 +235,11 @@ class SkillDependencyResolver:
                 achievement_result = self._find_skill_providing_achievement(req_item, processed_skills)
                 if achievement_result is not None:
                     providing_skill, providing_gain_key = achievement_result
+            elif req_item.startswith("level:"):
+                requirement_kind = "level"
+                level_result = self._find_skill_providing_level(req_item, processed_skills)
+                if level_result is not None:
+                    providing_skill, providing_gain_key = level_result
             else:
                 required_tier = quantity_needed if req_item in TIERED_INVENTORY_ITEMS else None
                 providing_skill = self._find_skill_providing_item(
@@ -286,6 +295,9 @@ class SkillDependencyResolver:
                         )
                         continue
 
+                    requirement_runs = 1
+                    valid_requirement = True
+                elif requirement_kind == "level":
                     requirement_runs = 1
                     valid_requirement = True
                 else:
@@ -353,6 +365,12 @@ class SkillDependencyResolver:
                 child_node.goal_amount = (
                     int(ceil(entries[0]["quantity_needed"])) if entries else None
                 )
+            elif all(e["requirement_kind"] == "level" for e in entries):
+                child_node.goal_kind = "level"
+                try:
+                    child_node.goal_amount = int(ceil(entries[0]["quantity_needed"])) if entries else None
+                except Exception:
+                    child_node.goal_amount = None
             else:
                 child_node.goal_kind = "mixed"
                 child_node.goal_amount = None
@@ -540,6 +558,8 @@ class SkillDependencyResolver:
         """
         inventory = {}
         achievements_state = {}
+        level_state = {}
+        stat_state = {}
         redundant_nodes = []
 
         for node in execution_order_nodes:
@@ -550,6 +570,8 @@ class SkillDependencyResolver:
             if node.level == 0:
                 gains = self._parse_lambda_gain(skill_name, amount, processed_skills)
                 achievement_gains = self._parse_achievement_gain(skill_name, amount, processed_skills)
+                level_gains = self._parse_level_gain(skill_name, amount, processed_skills)
+                stat_gains = self._parse_stat_gain(skill_name, amount, processed_skills)
                 consumption = self._parse_lambda_consumption(skill_name, amount, processed_skills)
 
                 for item, amount_consumed in consumption.items():
@@ -561,6 +583,18 @@ class SkillDependencyResolver:
                         inventory[item] = inventory.get(item, 0) + amount_gained
 
                 self._update_achievement_state(achievements_state, achievement_gains)
+                for key, val in level_gains.items():
+                    try:
+                        lv = int(val)
+                    except Exception:
+                        lv = 0
+                    level_state[key] = max(level_state.get(key, 0), lv)
+                for key, val in stat_gains.items():
+                    try:
+                        add = int(val)
+                    except Exception:
+                        add = 0
+                    stat_state[key] = stat_state.get(key, 0) + add
 
                 print(f"Keeping target skill {skill_name} (amount={amount}), inventory: {inventory}")
                 continue
@@ -570,6 +604,8 @@ class SkillDependencyResolver:
 
             gains = self._parse_lambda_gain(skill_name, amount, processed_skills)
             achievement_gains = self._parse_achievement_gain(skill_name, amount, processed_skills)
+            level_gains = self._parse_level_gain(skill_name, amount, processed_skills)
+            stat_gains = self._parse_stat_gain(skill_name, amount, processed_skills)
             consumption = self._parse_lambda_consumption(skill_name, amount, processed_skills)
 
             should_prune = False
@@ -580,7 +616,7 @@ class SkillDependencyResolver:
 
             if goal_entries:
                 if self._are_goal_entries_satisfied(
-                    goal_entries, inventory, achievements_state
+                    goal_entries, inventory, achievements_state, level_state, stat_state
                 ):
                     print(
                         f"Node {skill_name} already satisfies all grouped requirements"
@@ -690,13 +726,29 @@ class SkillDependencyResolver:
                     inventory[item] = inventory.get(item, 0) + amount_gained
 
             self._update_achievement_state(achievements_state, achievement_gains)
+            for key, val in level_gains.items():
+                try:
+                    lv = int(val)
+                except Exception:
+                    lv = 0
+                level_state[key] = max(level_state.get(key, 0), lv)
+            for key, val in stat_gains.items():
+                try:
+                    add = int(val)
+                except Exception:
+                    add = 0
+                stat_state[key] = stat_state.get(key, 0) + add
 
             print(f"Keeping node {skill_name} (amount={amount}), inventory: {inventory}")
 
         return redundant_nodes
 
-    def _are_goal_entries_satisfied(self, goal_entries, inventory, achievements_state):
+    def _are_goal_entries_satisfied(self, goal_entries, inventory, achievements_state, level_state=None, stat_state=None):
         """Check whether all grouped requirements for a node are already satisfied."""
+        if level_state is None:
+            level_state = {}
+        if stat_state is None:
+            stat_state = {}
 
         for entry in goal_entries:
             kind = entry.get("requirement_kind")
@@ -742,6 +794,26 @@ class SkillDependencyResolver:
                     current_amount = inventory.get(req_item, 0)
                     if current_amount < needed:
                         return False
+            elif kind == "level":
+                if not isinstance(req_item, str):
+                    return False
+                try:
+                    needed = max(0, int(ceil(quantity)))
+                except Exception:
+                    needed = 0
+                current = level_state.get(req_item, 0)
+                if current < needed:
+                    return False
+            elif kind == "stat_kills":
+                if not isinstance(req_item, str):
+                    return False
+                try:
+                    needed = max(0, int(ceil(quantity)))
+                except Exception:
+                    needed = 0
+                current = stat_state.get(req_item, 0)
+                if current < needed:
+                    return False
 
         return True
 
@@ -847,6 +919,22 @@ class SkillDependencyResolver:
         """Parse gains and return achievement-type quantities."""
         return self._parse_skill_gains_by_type(skill_name, n, processed_skills).get(
             "achievement", {}
+        )
+
+    def _parse_level_gain(self, skill_name, n=1, processed_skills=None):
+        """Parse gains and return level-type quantities."""
+        return self._parse_skill_gains_by_type(skill_name, n, processed_skills).get(
+            "level", {}
+        )
+
+    def _parse_stat_gain(self, skill_name, n=1, processed_skills=None):
+        """Parse gains and return stat-type quantities (e.g., stat_kills).
+
+        Stats are environment-specific (e.g., Craftax has monster kills, Fabrax doesn't).
+        Returns empty dict if stat gains are not defined for this environment.
+        """
+        return self._parse_skill_gains_by_type(skill_name, n, processed_skills).get(
+            "stat", {}
         )
 
     def _update_achievement_state(self, achievement_state: Dict[str, float], gains: Dict[str, float]):
@@ -1034,6 +1122,40 @@ class SkillDependencyResolver:
 
                 if normalized_key in candidate_keys:
                     return skill_name, gain_key
+
+        return None
+
+    def _find_skill_providing_level(self, level_key, skills_dict=None):
+        """Find a skill that provides the specified level key (e.g., 'level:player_level')."""
+        skills_to_search = skills_dict if skills_dict is not None else self.skills
+
+        for skill_name, skill_data in skills_to_search.items():
+            skill_with_consumption = skill_data.get("skill_with_consumption", {})
+            gain = skill_with_consumption.get("gain", {})
+            if not isinstance(gain, dict):
+                continue
+
+            if level_key in gain:
+                gain_entry = gain[level_key]
+                if isinstance(gain_entry, dict):
+                    gtype = gain_entry.get("type", "").lower() if isinstance(gain_entry.get("type", ""), str) else ""
+                    if gtype == "level":
+                        return skill_name, level_key
+                else:
+                    # Unstructured but matching key; assume level
+                    return skill_name, level_key
+
+            # Also scan typed entries
+            for gain_key, gain_entry in gain.items():
+                if isinstance(gain_entry, dict):
+                    gtype = gain_entry.get("type", "").lower() if isinstance(gain_entry.get("type", ""), str) else ""
+                    if gtype != "level":
+                        continue
+                    candidates = {gain_key}
+                    if not gain_key.startswith("level:"):
+                        candidates.add(f"level:{gain_key}")
+                    if level_key in candidates:
+                        return skill_name, gain_key
 
         return None
 

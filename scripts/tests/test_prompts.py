@@ -14,6 +14,7 @@ from flowrl.llm.craftax_classic.llm import generate_graph
 from flowrl.llm.craftax_classic.generate_code import validate_code, create_inventory_from_array
 from flowrl.skill_dependency_resolver import SkillDependencyResolver
 from flowrl.skill_depenency_resolver_new import SymbolicSkillDependencyResolver
+from flowrl.skill_dependency_resolver_unified import UnifiedPlanningSkillResolver
 import numpy as np
 import json
 
@@ -101,41 +102,131 @@ class PromptTester:
     
     def load_skills_from_json(self, json_file_path):
         """
-        Load all skills from a JSON file in the format used by the training runs.
-        
+        Load all skills from a JSON file.
+
+        Supports two formats:
+        1. Training format: {"data": {skill_name: skill_info, ...}}
+        2. Knowledge base format: {"skills": [skill_dict, ...], "tutorial_context": ...}
+
         Args:
-            json_file_path: Path to the skills.json file
+            json_file_path: Path to the skills.json or knowledgebase.json file
         """
         import json
         from pathlib import Path
-        
+
         json_path = Path(json_file_path)
-        if not json_path.exists():
-            raise FileNotFoundError(f"Skills file not found: {json_file_path}")
-        
+        assert json_path.exists(), f"Skills file not found: {json_file_path}"
+
         print(f"Loading skills from: {json_file_path}")
-        
+
         with open(json_path, 'r') as f:
             skills_data = json.load(f)
-        
-        # Extract skills from the "data" key
-        if "data" not in skills_data:
-            raise ValueError("Expected 'data' key in skills JSON file")
-        
-        skills = skills_data["data"]
-        
+
         # Clear existing skills first
         self.db["skills"].clear()
-        
-        # Add each skill to the database
+
         skills_added = 0
-        for skill_name, skill_info in skills.items():
-            # The skill_info already has the correct format with skill_with_consumption
-            self.db["skills"][skill_name] = skill_info
-            skills_added += 1
-            print(f"  Added: {skill_name}")
-        
+
+        # Detect format and load accordingly
+        if "data" in skills_data:
+            # Training format: {"data": {skill_name: skill_info}}
+            print("Detected training format (with 'data' key)")
+            skills = skills_data["data"]
+
+            for skill_name, skill_info in skills.items():
+                # The skill_info already has the correct format with skill_with_consumption
+                self.db["skills"][skill_name] = skill_info
+                skills_added += 1
+                print(f"  Added: {skill_name}")
+
+        elif "skills" in skills_data and isinstance(skills_data["skills"], list):
+            # Knowledge base format: {"skills": [skill_dict, ...]}
+            print("Detected knowledge base format (with 'skills' list)")
+            skills_list = skills_data["skills"]
+
+            for skill_dict in skills_list:
+                skill_name = skill_dict.get("skill_name")
+                assert skill_name, "Skill missing 'skill_name' field in knowledge base"
+
+                # Convert knowledge base format to internal format
+                skill_entry = {
+                    "skill_name": skill_name,
+                    "skill_with_consumption": {
+                        "skill_name": skill_name,
+                        "description": skill_dict.get("description", ""),
+                        "requirements": skill_dict.get("requirements", {}),
+                        "consumption": skill_dict.get("consumption", {}),
+                        "gain": skill_dict.get("gain", {}),
+                        "ephemeral": skill_dict.get("ephemeral", False),
+                    },
+                    "functions": [],  # Knowledge base skills don't have generated code yet
+                    "iteration": 0
+                }
+
+                self.db["skills"][skill_name] = skill_entry
+                skills_added += 1
+                print(f"  Added: {skill_name}")
+
+        else:
+            raise ValueError(
+                "Unknown skills JSON format. Expected either:\n"
+                "  - Training format: {'data': {skill_name: skill_info, ...}}\n"
+                "  - Knowledge base format: {'skills': [skill_dict, ...], 'tutorial_context': ...}"
+            )
+
         print(f"Successfully loaded {skills_added} skills from {json_path.name}")
+        return skills_added
+
+    def load_skills_from_scheduler_state(self, scheduler_state_path):
+        """
+        Load all skills from a parallel scheduler_state.json file.
+
+        Args:
+            scheduler_state_path: Path to the scheduler_state.json file from parallel training
+        """
+        import json
+        from pathlib import Path
+
+        state_path = Path(scheduler_state_path)
+        if not state_path.exists():
+            raise FileNotFoundError(f"Scheduler state file not found: {scheduler_state_path}")
+
+        print(f"Loading skills from scheduler state: {scheduler_state_path}")
+
+        with open(state_path, 'r') as f:
+            scheduler_state = json.load(f)
+
+        # Extract skills from the "skills" key
+        if "skills" not in scheduler_state:
+            raise ValueError("Expected 'skills' key in scheduler state JSON file")
+
+        skills = scheduler_state["skills"]
+
+        # Clear existing skills first
+        self.db["skills"].clear()
+
+        # Add each skill to the database
+        # In the scheduler state, each skill has a different format:
+        # - It has "skill_name" and "skill_data" keys
+        # - skill_data contains the actual skill information
+        skills_added = 0
+        for skill_key, skill_entry in skills.items():
+            if "skill_data" not in skill_entry:
+                print(f"  Warning: Skipping {skill_key}, no skill_data found")
+                continue
+
+            skill_data = skill_entry["skill_data"]
+            skill_name = skill_data.get("skill_name", skill_key)
+
+            # The skill_data has the right format with skill_with_consumption, functions, etc.
+            self.db["skills"][skill_name] = skill_data
+            skills_added += 1
+
+            # Show status information
+            status = skill_entry.get("status", "unknown")
+            print(f"  Added: {skill_name} (status: {status})")
+
+        print(f"Successfully loaded {skills_added} skills from scheduler state")
         return skills_added
         
     def remove_skill(self, skill_name):
@@ -581,6 +672,7 @@ class PromptTester:
         n=1,
         max_inventory_capacity=9,
         use_symbolic_state=False,
+        use_unified_planner=False,
         initial_symbolic_state=None,
     ):
         """Resolve dependencies for a skill and return the execution order.
@@ -590,6 +682,7 @@ class PromptTester:
             n: Number of times to apply this skill (default: 1)
             max_inventory_capacity: Maximum inventory capacity per item (default: 9)
             use_symbolic_state: When True, plan over the richer symbolic state representation
+            use_unified_planner: When True, use the Unified Planning Library (much simpler!)
             initial_symbolic_state: Optional `SymbolicState` to seed the symbolic resolver
 
         Returns:
@@ -601,10 +694,19 @@ class PromptTester:
 
         print(
             f"Resolving dependencies for '{skill_name}' with n={n}, max_inventory={max_inventory_capacity}, "
-            f"symbolic={use_symbolic_state}"
+            f"symbolic={use_symbolic_state}, unified_planner={use_unified_planner}"
         )
 
-        if use_symbolic_state:
+        if use_unified_planner:
+            resolver = UnifiedPlanningSkillResolver(
+                self.db["skills"],
+                max_inventory_capacity,
+                initial_state=initial_symbolic_state,
+            )
+            execution_order = resolver.resolve_dependencies(
+                skill_name, n, initial_state=initial_symbolic_state
+            )
+        elif use_symbolic_state:
             resolver = SymbolicSkillDependencyResolver(
                 self.db["skills"],
                 max_inventory_capacity,
@@ -718,6 +820,7 @@ class PromptTester:
         output_path=None,
         max_inventory_capacity=9,
         use_symbolic_state=False,
+        use_unified_planner=False,
         initial_symbolic_state=None,
         test_frontier=False,
     ):
@@ -730,6 +833,7 @@ class PromptTester:
             output_path: Path to write the module file (defaults to ./{skill_name.lower().replace(' ', '_')}.py)
             max_inventory_capacity: Maximum inventory capacity per item
             use_symbolic_state: When True, execute dependency planning with SymbolicState resolver
+            use_unified_planner: When True, use the Unified Planning Library (much simpler!)
             initial_symbolic_state: Optional symbolic state override for planning context
             test_frontier: When True, also run frontier calculation and time it
 
@@ -748,6 +852,7 @@ class PromptTester:
             n,
             max_inventory_capacity,
             use_symbolic_state=use_symbolic_state,
+            use_unified_planner=use_unified_planner,
             initial_symbolic_state=initial_symbolic_state,
         )
 

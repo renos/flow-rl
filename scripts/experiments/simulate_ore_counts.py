@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
 Script to simulate Fabrax world generation and count average ore spawns.
+
+Additionally, if Craftax (non‑Fabrax) modules are available, also sample Craftax
+worlds to verify the presence of the down staircase (ladder) on Floor 0 and
+report simple statistics for it. This is helpful to sanity‑check ladder spawning.
 """
 
 import jax
@@ -17,6 +21,16 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'Craftax'))
 
 from craftax.fabrax.world_gen import generate_world
 from craftax.fabrax.constants import BlockType
+
+# Optional Craftax (non‑Fabrax) imports for ladder stats
+_HAS_CRAFTAX = False
+try:
+    from craftax.craftax.craftax.world_gen.world_gen import generate_world as c_generate_world
+    from craftax.craftax.craftax.craftax_state import EnvParams as CEnvParams, StaticEnvParams as CStaticEnvParams
+    from craftax.craftax.craftax.constants import ItemType as CItemType
+    _HAS_CRAFTAX = True
+except Exception:
+    _HAS_CRAFTAX = False
 
 
 @struct.dataclass
@@ -69,7 +83,10 @@ def count_ores_in_map(world_map: jnp.ndarray) -> Dict[str, int]:
 
 
 def simulate_world_generation(num_simulations: int = 100, map_size: tuple = (64, 64)) -> Dict[str, List[float]]:
-    """Simulate world generation multiple times and collect ore counts"""
+    """Simulate world generation multiple times and collect ore counts.
+
+    If Craftax is available, also collect down‑ladder counts from Craftax Floor 0.
+    """
 
     static_params = StaticParams(map_size=map_size)
     all_counts = {
@@ -77,6 +94,7 @@ def simulate_world_generation(num_simulations: int = 100, map_size: tuple = (64,
         'limestone': [], 'sand': [], 'clay': [], 'stone': [], 'grass': [],
         'water': [], 'tree': []
     }
+    craftax_down_ladder_counts: List[int] = []
 
     print(f"Simulating {num_simulations} world generations with map size {map_size}...")
 
@@ -92,7 +110,7 @@ def simulate_world_generation(num_simulations: int = 100, map_size: tuple = (64,
             always_diamond=True  # Use natural diamond generation
         )
 
-        # Generate world
+        # Generate Fabrax world for ore/terrain counts
         state = generate_world(rng, params, static_params)
 
         # Count ores in this world
@@ -101,6 +119,19 @@ def simulate_world_generation(num_simulations: int = 100, map_size: tuple = (64,
         # Add to our collection
         for ore_type, count in ore_counts.items():
             all_counts[ore_type].append(count)
+
+        # Optionally: sample Craftax world to check down‑ladder on Floor 0
+        if _HAS_CRAFTAX:
+            rng_c = jax.random.PRNGKey(10_000 + i)
+            c_state = c_generate_world(rng_c, CEnvParams(), CStaticEnvParams(map_size=map_size))
+            # Count ladder down tiles on Floor 0 using item_map and ItemType
+            # item_map shape: (levels, H, W); Floor 0 is index 0.
+            down_count = int(jnp.sum(c_state.item_map[0] == CItemType.LADDER_DOWN.value))
+            craftax_down_ladder_counts.append(down_count)
+
+    # Attach Craftax ladder stats if available
+    if _HAS_CRAFTAX:
+        all_counts['craftax_down_ladder_count'] = craftax_down_ladder_counts
 
     return all_counts
 
@@ -118,7 +149,7 @@ def calculate_statistics(counts: List[float]) -> Dict[str, float]:
 
 
 def print_results(all_counts: Dict[str, List[float]], map_size: tuple):
-    """Print formatted results"""
+    """Print formatted results, including optional Craftax down‑ladder stats."""
     total_blocks = map_size[0] * map_size[1]
 
     print(f"\n{'='*60}")
@@ -157,6 +188,15 @@ def print_results(all_counts: Dict[str, List[float]], map_size: tuple):
                 spawn_rate = (ore_stats['mean'] / stone_stats['mean']) * 100
                 print(f"{ore.upper():<12}: {spawn_rate:.2f}%")
 
+    # Optional Craftax down‑ladder stats (Floor 0)
+    if 'craftax_down_ladder_count' in all_counts and all_counts['craftax_down_ladder_count']:
+        ladder_stats = calculate_statistics(all_counts['craftax_down_ladder_count'])
+        print(f"\n{'CRAFtAX FLOOR 0 DOWN-LADDER'}")
+        print("-" * 40)
+        print(f"mean count: {ladder_stats['mean']:.2f} | std: {ladder_stats['std']:.2f} | min: {ladder_stats['min']:.0f} | max: {ladder_stats['max']:.0f}")
+    else:
+        print(f"\nCraftax ladder stats: unavailable (Craftax modules not found in environment)")
+
 
 def main():
     """Main function"""
@@ -176,6 +216,7 @@ def main():
 
     # Run simulation
     all_counts = simulate_world_generation(num_simulations, map_size)
+    print(all_counts)
 
     # Print results
     print_results(all_counts, map_size)

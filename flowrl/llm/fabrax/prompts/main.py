@@ -232,6 +232,7 @@ CRITICAL CHECKS:
 - Requirements CAN be fulfilled by current frontier
 - Gains are NEW (extend beyond current frontier)
 
+
 # Gain Schema
 Each skill has ONE primary goal. Include all symbolic state changes that occur from achieving that goal.
 
@@ -248,9 +249,9 @@ Use `achievement:` prefixes where applicable.
 Finally, complete the following Json dictionary as your output.
 ```json
 {
-"skill_name": # name of the objective
-"description": # (string) 1-line description of the objective
-"gain": { # structured gains following the schema above
+"skill_name": ,              # name of the objective
+"description": ,            # (string) 1-line description
+"gain": {                   # structured gains following the schema above
   "gain_key": {
     "type": "inventory | achievement | ephemeral",
     "expression": "lambda n: ...",
@@ -277,7 +278,7 @@ $db.knowledge_base$
 
 Existing Skills
 ```
-$db.skills$
+$db.skills_without_code$
 ```
 
 Skill to Learn
@@ -341,6 +342,43 @@ Finally, complete the following Json dictionary as your output.
         "compose": ComposeReasoningPrompt(),
         "query": LLM_API_FUNCTION_GPT4,
         "after_query": SubtaskAfterQuery(),
+    }
+
+    prompts["continue_training_decision"] = {
+        "prompt": """
+Analyze whether to CONTINUE TRAINING an existing prerequisite skill instead of proceeding with the proposed skill.
+
+Existing Skills (metrics may appear under each entry):
+```
+$db.skills_without_code$
+```
+
+Current Skill:
+```
+$db.current.skill_with_consumption$
+```
+
+# Instruction
+- Map requirement/consumption keys to the skills that produce those gains.
+- If a prerequisite skill shows low success consider continuing its training first. Treat success_rate < 0.5 as low success.
+- Only recommend continuation when it blocks meaningful progress on the current skill.
+- Skills are trained initially for up to 10 million timesteps. Propose an increment of 10 million for further training. if extra timesteps is needed.
+
+# Output JSON
+```json
+{
+  "continue_training": ,
+  "skill_name": ,
+  "extra_timesteps": 0,
+  "reason": ""
+}
+```
+        """,
+        "dep": [],
+        "after": ["next_subtask"],
+        "compose": ComposeReasoningPrompt(),
+        "query": LLM_API_FUNCTION_GPT4,
+        "after_query": ContinueTrainingDecisionAfterQuery(),
     }
 
     # temp_prompts["densify_reward_reasoning"]
@@ -511,7 +549,7 @@ Return the raw factor value that measures the skill's gain. Requirements and con
 ```
         """,
         "dep": [],
-        "after": ["next_subtask"],
+        "after": ["next_subtask", "continue_training_decision"],
         "compose": ComposeReasoningPrompt(),
         "query": LLM_API_FUNCTION_GPT4,
         "after_query": DensifyAfterQuery(),
@@ -726,6 +764,7 @@ The current number of skills is:
 $db.current.num_skills$
 ```
 
+ 
 ## Implementation Guidelines:
 
 For `task_is_done`: 
@@ -753,6 +792,7 @@ import jax
         "dep": [],
         "after": [
             "next_subtask",
+            "continue_training_decision",
             "create_skill_densify_reward_reasoning",
         ],
         "compose": ComposeReasoningPrompt(),

@@ -14,3 +14,4 @@ achievement_flowcharts/*
 .vscode/*
 .DS_Store
 AGENTS.md
+transformerXL_PPO_JAX/

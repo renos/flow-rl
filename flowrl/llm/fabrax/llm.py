@@ -18,15 +18,25 @@ try:
     import llm_api
 
     get_query = llm_api.get_query
-    llm_name = "yintat-gpt-4o"
+    default_llm_name = "yintat-gpt-4o"
 except:
     get_query = agentkit.llm_api.get_query
-    llm_name = "gpt-5"
-    # llm_name = "google-gemini-2.0-pro-exp-02-05"
-    # llm_name = "google-gemini-2.0-flash-thinking-exp"
+    default_llm_name = "gpt-5"
+    # default_llm_name = "google-gemini-2.0-pro-exp-02-05"
+    # default_llm_name = "google-gemini-2.0-flash-thinking-exp"
 
 
-def generate_graph(db=None, return_inventory_graph=False):
+def generate_graph(db=None, return_inventory_graph=False, llm_name=None):
+    """
+    Generate the skill learning graph.
+
+    Args:
+        db: Database dict (optional)
+        return_inventory_graph: Whether to return inventory graph (optional)
+        llm_name: Name of LLM to use (e.g., "gpt-5", "gpt-4o-mini"). If None, uses default.
+    """
+    if llm_name is None:
+        llm_name = default_llm_name
 
     MANUAL = get_ctxt()
 

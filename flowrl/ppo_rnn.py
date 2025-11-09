@@ -23,7 +23,7 @@ from flax.training.train_state import TrainState
 import distrax
 import functools
 
-from wrappers import (
+from flowrl.wrappers import (
     LogWrapper,
     OptimisticResetVecEnvWrapper,
     BatchEnvWrapper,

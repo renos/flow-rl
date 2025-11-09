@@ -73,6 +73,13 @@ if __name__ == "__main__":
         type=str,
         default="$PROJECT_DIR/exp/bottom_up/",
     )
+    # LLM model name
+    parser.add_argument(
+        "--llm_name",
+        type=str,
+        default=None,
+        help='LLM model to use (e.g., "gpt-5", "gpt-4o-mini"). If not specified, uses default (gpt-5).'
+    )
     # what sucdess rate to achieve before optimizing next node
     parser.add_argument("--success_state_rate", type=float, default=0.8)
     parser.add_argument(

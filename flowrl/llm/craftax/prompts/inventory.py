@@ -16,7 +16,7 @@ $db.current.skill_with_consumption$
 
 Existing Skills (for requirements validation):
 ```
-$db.skills$
+$db.skills_without_code$
 ```
 
 Trajectory Data:
@@ -55,7 +55,7 @@ Update the skill's requirements and gain based on what the trajectory revealed.
 "updated_consumption": {}, # amount consumed using "lambda n: a*n + b" format. Each key must exactly match the key of a gain of a previous skill.
 "updated_gain": { # structured gains following the same schema as new skills
   "gain_key": {
-    "type": "inventory | achievement | level | ephemeral",
+    "type": "inventory | achievement | level | stat | ephemeral",
     "expression": "lambda n: ...",
     "description": "optional context"
   }

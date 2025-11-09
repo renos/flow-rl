@@ -129,7 +129,6 @@ def verify_function(functions):
         task_reward_sucessful = True
     except Exception as e:
         task_reward_exception = str(e)
-        breakpoint()
 
     return (
         is_task_done_sucessful,

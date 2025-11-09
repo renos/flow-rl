@@ -2,9 +2,10 @@ from agentkit import after_query as aq
 from agentkit import Graph, SimpleDBNode
 from flowrl.llm.compose_prompts import ComposeReasoningPrompt
 import json
+from flowrl.llm.exceptions import ContinueSkillException
 
 
-ALLOWED_GAIN_TYPES = {"inventory", "achievement", "level", "ephemeral"}
+ALLOWED_GAIN_TYPES = {"inventory", "achievement", "level", "stat", "ephemeral"}
 
 
 def normalize_gain_schema(raw_gain: dict, error_cls, context: str = "gain"):
@@ -127,7 +128,6 @@ class TaskAfterQuery(aq.JsonAfterQuery):
         return is_valid, conflicting_gains, existing_gains
 
     def post_process(self):
-
         parsed_answer = self.parse_json()[-1]
 
         # Normalize gain schema to structured format
@@ -155,6 +155,43 @@ class TaskAfterQuery(aq.JsonAfterQuery):
 
         self.node.db["current"]["skill_name"] = parsed_answer["skill_name"]
         self.node.db["current"]["skill"] = parsed_answer
+
+
+class ContinueTrainingDecisionAfterQuery(aq.JsonAfterQuery):
+
+    def __init__(self):
+        super().__init__()
+        self.type = dict
+        self.required_keys = [
+            "continue_training",
+        ]
+
+    def post_process(self):
+        parsed = self.parse_json()[-1]
+        cont = bool(parsed.get("continue_training", False))
+        if not cont:
+            return
+
+        target = parsed.get("skill_name")
+        extra = int(parsed.get("extra_timesteps", 0) or 0)
+        if not target:
+            # No target specified; ignore continuation
+            return
+
+        existing_skills = self.node.db.get("skills", {})
+        if target not in existing_skills:
+            # Unknown skill; ignore continuation
+            return
+
+        decision = {
+            "action": "continue_training",
+            "skill_name": target,
+            "extra_timesteps": extra,
+        }
+        self.node.db.setdefault("current", {})
+        self.node.db["current"]["decision"] = decision
+        # Signal to outer loop to skip new generation
+        raise ContinueSkillException(decision)
 
 
 class RestartGraphException(Exception):
@@ -220,8 +257,12 @@ class SubtaskAfterQuery(aq.JsonAfterQuery):
 
             from flowrl.llm.craftax.symbolic_state import verify_skill
 
-            # Get existing skills from database
-            existing_skills = self.node.db.get("skills", {})
+            # Get BOTH completed and training skills for full frontier view
+            completed_skills = self.node.db.get("skills", {})
+            training_skills = self.node.db.get("training_skills", {})
+
+            # Merge for complete frontier calculation
+            all_skills = {**completed_skills, **training_skills}
 
             # Determine inventory capacity based on frontier summary content
             frontier_summary = self.node.db.get("frontier_summary", "")
@@ -234,8 +275,8 @@ class SubtaskAfterQuery(aq.JsonAfterQuery):
             # Extract skill name from the current skill data
             skill_name = parsed_answer.get("skill_name", "unknown_skill")
 
-            # Use the existing verify_skill function
-            is_novel, is_feasible = verify_skill(skill_name, parsed_answer, existing_skills, max_capacity)
+            # Use the existing verify_skill function with ALL skills
+            is_novel, is_feasible = verify_skill(skill_name, parsed_answer, all_skills, max_capacity)
 
             # Generate verification message
             if is_feasible and is_novel:
@@ -243,7 +284,7 @@ class SubtaskAfterQuery(aq.JsonAfterQuery):
             elif is_feasible and not is_novel:
                 message = f"✗ Skill '{skill_name}' is feasible but NOT novel - already achievable by existing skills"
             elif not is_feasible and is_novel:
-                message = f"⚠ Skill '{skill_name}' is novel but NOT feasible - preconditions cannot be satisfied {skill_name, parsed_answer, existing_skills, max_capacity}"
+                message = f"⚠ Skill '{skill_name}' is novel but NOT feasible - preconditions cannot be satisfied {skill_name, parsed_answer, all_skills, max_capacity}"
             else:
                 message = f"✗ Skill '{skill_name}' is neither feasible nor novel - should not be trained"
 
@@ -637,7 +678,7 @@ class Achievement(Enum):
 
 #Here are example docstrings:
 
-def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev, player_intrinsics, player_intrinsics_diff, achievements, n):
+def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev, player_level, monsters_killed, player_intrinsics, player_intrinsics_diff, achievements, n):
     \"\"\"
     Determines whether Task is complete.
     Do not call external functions or make any assumptions beyond the information given to you.
@@ -645,10 +686,12 @@ def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev,
     Args:
         inventory (Inventory): The player's current inventory, defined in the above struct
         inventory_diff (Inventory): The player's difference in inventory, defined in the above struct
-        closest_blocks (numpy.ndarray): A 3D array of shape (len(BlockType), 2, K) representing the K closest blocks of each type. Default values are (30, 30) for unseen blocks.
+        closest_blocks (numpy.ndarray): A 3D array of shape (len(BlockType)+3, 2, K). The first len(BlockType) channels are blocks; the final three channels are item overlay ladders: [LADDER_DOWN, LADDER_UP, LADDER_DOWN_BLOCKED]. Default values are (30, 30) for unseen entries.
         #default of 30,30 if less then k seen, ordered by distance (so :,:,0 would be the closest of each block type
         closest_blocks_prev (numpy.ndarray): A 3D array of shape (len(BlockType), 2, K) representing the K closest blocks of each type from the previous timestep, 
         #default of 30,30 if less then k seen, ordered by distance (so :,:,0 would be the closest of each block type
+        player_level (int): The current dungeon level index (0-based)
+        monsters_killed (jnp.ndarray): Vector (len=StaticEnvParams.num_levels) of monsters defeated per floor; use monsters_killed[player_level] for current floor status
         player_intrinsics (jnp.ndarray): An len 5 array representing the player's health, food, drink, energy, and mana levels
         player_intrinsics_diff (jnp.ndarray): An len 5 array representing the change in the player's health, food, drink, energy, and mana levels
         achievements (jnp.ndarray): A 1D array (67,) of achievements, where each element is an boolean indicating the corresponding achievement has been completed.
@@ -660,17 +703,19 @@ def task_is_done(inventory, inventory_diff, closest_blocks, closest_blocks_prev,
     return TODO
 
 
-def task_reward(inventory_diff, closest_blocks, player_intrinsics_diff, achievements_diff, health_penalty):
+def task_reward(inventory_diff, closest_blocks, closest_blocks_prev, player_level_diff, monsters_killed_diff, player_intrinsics_diff, achievements_diff, health_penalty):
     \"\"\"
     Calculates the reward for Task based on changes in inventory and other factors.
     Do not call external functions or make any assumptions beyond the information given to you.
 
     Args:
         inventory_diff (Inventory): The change in the player's inventory between the current and previous timesteps, same struct as above.
-        closest_blocks (numpy.ndarray): A 3D array of shape (len(BlockType), 2, K) representing the K closest blocks of each type, 
+        closest_blocks (numpy.ndarray): A 3D array of shape (len(BlockType)+3, 2, K) with last channels for ladders (down, up, down_blocked), 
         #default of 30,30 if less then k seen, ordered by distance (so :,:,0 would be the closest of each block type. The 2 corresponds to the x and y coordinates of the block.
         closest_blocks_prev (numpy.ndarray): A 3D array of shape (len(BlockType), 2, K) representing the K closest blocks of each type from the previous timestep, 
         #default of 30,30 if less then k seen, ordered by distance (so :,:,0 would be the closest of each block type. The 2 corresponds to the x and y coordinates of the block.
+        player_level_diff (int): Change in dungeon level this step (e.g., -1, 0, +1)
+        monsters_killed_diff (jnp.ndarray): Per-floor differences this step (vector)
         health_penalty (float): The penalty for losing health. Negative when loosing health and positive when regaining health.
         player_intrinsics_diff (jnp.ndarray): An len 5 array representing the change in the player's health, food, drink, energy, and mana levels
         achievements_diff (jnp.ndarray): A 1D array (67,) of achievements, where each element is a boolean indicating whether the corresponding achievement has been completed in the last timestep.

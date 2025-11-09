@@ -4,6 +4,35 @@ import os
 import jax.numpy as jnp
 
 
+def _craftax_expected_signatures():
+    return {
+        "task_is_done": [
+            "inventory",
+            "inventory_diff",
+            "closest_blocks",
+            "closest_blocks_prev",
+            "player_level",
+            "monsters_killed",
+            "player_intrinsics",
+            "player_intrinsics_diff",
+            "achievements",
+            "n",
+        ],
+        "task_reward": [
+            "inventory_diff",
+            "closest_blocks",
+            "closest_blocks_prev",
+            "player_level",
+            "monsters_killed",
+            "monsters_killed_diff",
+            "player_intrinsics_diff",
+            "achievements_diff",
+            "health_penalty",
+        ],
+        "task_network_number": [],
+    }
+
+
 def generate_py_file(data, file_path="generated_file.py"):
 
     with open(file_path, "w") as f:
@@ -15,7 +44,10 @@ def generate_py_file(data, file_path="generated_file.py"):
 
     for i, (key, response) in enumerate(data.items()):
         if i > 0:  # Skip the first item, as it generates tasks
-            functions, exception = process_generated_code(response)
+            functions, exception = process_generated_code(
+                response,
+                expected_signatures=_craftax_expected_signatures(),
+            )
             if exception != "":
                 print(False, exception, False, exception)
                 continue
@@ -59,7 +91,9 @@ def generate_py_file(data, file_path="generated_file.py"):
 
 
 def validate_code(generated_code):
-    functions, exception = process_generated_code(generated_code)
+    functions, exception = process_generated_code(
+        generated_code, expected_signatures=_craftax_expected_signatures()
+    )
     if exception != "":
         return (
             None,

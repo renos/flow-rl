@@ -139,7 +139,7 @@ $db.knowledge_base$
 
 Existing Skills
 ```
-$db.skills$
+$db.skills_without_code$
 ```
 
 Skill to Learn
@@ -196,6 +196,42 @@ Finally, complete the following Json dictionary as your output.
         "compose": ComposeReasoningPrompt(),
         "query": LLM_API_FUNCTION_GPT4,
         "after_query": SubtaskAfterQuery(),
+    }
+
+    prompts["continue_training_decision"] = {
+        "prompt": """
+Decide whether to CONTINUE TRAINING an existing prerequisite skill before attempting the current skill.
+
+Existing Skills and Metrics:
+```
+$db.skills_without_code$
+```
+
+Current Skill (requirements/consumption):
+```
+$db.current.skill_with_consumption$
+```
+
+# Instruction
+- Match requirement/consumption keys to producing skills.
+- If a dependency has poor metrics, consider continuing its training first. Treat success_rate < 0.5 as low success.
+- Only recommend continuation when it bottlenecks the proposed skill.
+
+# Output JSON
+```json
+{
+  "continue_training": ,
+  "skill_name": ,
+  "extra_timesteps": 0,
+  "reason": ""
+}
+```
+        """,
+        "dep": [],
+        "after": ["next_subtask"],
+        "compose": ComposeReasoningPrompt(),
+        "query": LLM_API_FUNCTION_GPT4,
+        "after_query": ContinueTrainingDecisionAfterQuery(),
     }
 
     # temp_prompts["densify_reward_reasoning"]
@@ -332,7 +368,7 @@ If no dense reward function is possible or needed for this task, simply state NA
 ```
         """,
         "dep": [],
-        "after": ["next_subtask"],
+        "after": ["next_subtask", "continue_training_decision"],
         "compose": ComposeReasoningPrompt(),
         "query": LLM_API_FUNCTION_GPT4,
         "after_query": DensifyAfterQuery(),
@@ -507,6 +543,7 @@ import jax
         "dep": [],
         "after": [
             "next_subtask",
+            "continue_training_decision",
             "create_skill_densify_reward_reasoning",
         ],
         "compose": ComposeReasoningPrompt(),

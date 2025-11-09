@@ -2,6 +2,7 @@ from agentkit import after_query as aq
 from agentkit import Graph, SimpleDBNode
 from flowrl.llm.compose_prompts import ComposeReasoningPrompt
 import json
+from flowrl.llm.exceptions import ContinueSkillException
 
 
 class TaskAfterQuery(aq.JsonAfterQuery):
@@ -53,7 +54,6 @@ class TaskAfterQuery(aq.JsonAfterQuery):
         return is_valid, conflicting_gains, existing_gains
 
     def post_process(self):
-
         parsed_answer = self.parse_json()[-1]
 
         # Validate that at least one gain is unique
@@ -71,6 +71,40 @@ class TaskAfterQuery(aq.JsonAfterQuery):
 
         self.node.db["current"]["skill_name"] = parsed_answer["skill_name"]
         self.node.db["current"]["skill"] = parsed_answer
+
+
+class ContinueTrainingDecisionAfterQuery(aq.JsonAfterQuery):
+
+    def __init__(self):
+        super().__init__()
+        self.type = dict
+        self.required_keys = [
+            "continue_training",
+        ]
+
+    def post_process(self):
+        parsed = self.parse_json()[-1]
+        cont = bool(parsed.get("continue_training", False))
+        if not cont:
+            return
+
+        target = parsed.get("skill_name")
+        extra = int(parsed.get("extra_timesteps", 0) or 0)
+        if not target:
+            return
+
+        existing_skills = self.node.db.get("skills", {})
+        if target not in existing_skills:
+            return
+
+        decision = {
+            "action": "continue_training",
+            "skill_name": target,
+            "extra_timesteps": extra,
+        }
+        self.node.db.setdefault("current", {})
+        self.node.db["current"]["decision"] = decision
+        raise ContinueSkillException(decision)
 
 
 class RestartGraphException(Exception):

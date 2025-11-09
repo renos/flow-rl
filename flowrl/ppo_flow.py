@@ -165,28 +165,36 @@ def make_train(config, prev_model_state=None, return_test_network=False):
             # )
             assert 0, "Not implemented atm"
 
-        rng, _rng = jax.random.split(rng)
-        init_x = jnp.zeros((1, *env.observation_space(env_params).shape))
-        init_states = jnp.zeros((1,), dtype=jnp.int32)
-        network_params = network.init(_rng, init_x, init_states)
-        network_params = jax.pure_callback(
-            param_updater, network_params, network_params
-        )
-        if config["ANNEAL_LR"]:
-            tx = optax.chain(
-                optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-                optax.adam(learning_rate=linear_schedule, eps=1e-5),
-            )
+        # Check if we're doing continuation (full TrainState with optimizer) vs new expert (just params)
+        is_continuation = prev_model_state is not None and hasattr(prev_model_state, 'opt_state')
+
+        if is_continuation:
+            # Continuation: use the restored TrainState directly to preserve optimizer state
+            train_state = prev_model_state
         else:
-            tx = optax.chain(
-                optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-                optax.adam(config["LR"], eps=1e-5),
+            # New expert or fresh training: create new TrainState with fresh optimizer
+            rng, _rng = jax.random.split(rng)
+            init_x = jnp.zeros((1, *env.observation_space(env_params).shape))
+            init_states = jnp.zeros((1,), dtype=jnp.int32)
+            network_params = network.init(_rng, init_x, init_states)
+            network_params = jax.pure_callback(
+                param_updater, network_params, network_params
             )
-        train_state = TrainState.create(
-            apply_fn=network.apply,
-            params=network_params,
-            tx=tx,
-        )
+            if config["ANNEAL_LR"]:
+                tx = optax.chain(
+                    optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+                    optax.adam(learning_rate=linear_schedule, eps=1e-5),
+                )
+            else:
+                tx = optax.chain(
+                    optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+                    optax.adam(config["LR"], eps=1e-5),
+                )
+            train_state = TrainState.create(
+                apply_fn=network.apply,
+                params=network_params,
+                tx=tx,
+            )
 
         ex_state = {}
 
@@ -290,7 +298,8 @@ def make_train(config, prev_model_state=None, return_test_network=False):
 
             # UPDATE NETWORK
             def _update_epoch(update_state, unused):
-                def _update_minbatch(train_state, batch_info):
+                def _update_minbatch(carry, batch_info):
+                    train_state, agg = carry
                     traj_batch, advantages, targets = batch_info
 
                     # Policy/value network
@@ -312,7 +321,34 @@ def make_train(config, prev_model_state=None, return_test_network=False):
 
                         # CALCULATE ACTOR LOSS
                         ratio = jnp.exp(log_prob - traj_batch.log_prob)
-                        gae = (gae - gae.mean()) / (gae.std() + 1e-8)
+                        # Advantage normalization: per-skill (optional) or global
+                        gae_raw = gae
+                        if config.get("PER_SKILL_ADV_NORM", False):
+                            skill_ids = map_player_state_to_skill(traj_batch.player_state)
+                            eps = 1e-8
+                            # Per-skill counts, sums, and sums of squares
+                            counts = jnp.bincount(skill_ids, length=num_heads)
+                            sum_adv = jnp.bincount(skill_ids, weights=gae, length=num_heads)
+                            sum_sq = jnp.bincount(
+                                skill_ids, weights=gae * gae, length=num_heads
+                            )
+                            mean = sum_adv / jnp.maximum(counts, 1)
+                            var = sum_sq / jnp.maximum(counts, 1) - mean * mean
+                            std = jnp.sqrt(jnp.maximum(var, eps))
+
+                            per_mean = mean[skill_ids]
+                            per_std = jnp.maximum(std[skill_ids], eps)
+                            gae_per = (gae - per_mean) / per_std
+
+                            # Fallback to global when per-skill sample count is too small
+                            min_count = config.get("PER_SKILL_ADV_MIN_COUNT", 32)
+                            sample_counts = counts[skill_ids]
+                            gae_global = (gae - gae.mean()) / (gae.std() + eps)
+                            gae = jnp.where(sample_counts >= min_count, gae_per, gae_global)
+                            # Optional clipping to suppress heavy tails on tiny groups
+                            gae = jnp.clip(gae, -5.0, 5.0)
+                        else:
+                            gae = (gae - gae.mean()) / (gae.std() + 1e-8)
                         loss_actor1 = ratio * gae
                         loss_actor2 = (
                             jnp.clip(
@@ -331,16 +367,63 @@ def make_train(config, prev_model_state=None, return_test_network=False):
                             + config["VF_COEF"] * value_loss
                             - config["ENT_COEF"] * entropy
                         )
-                        return total_loss, (value_loss, loss_actor, entropy)
+                        # Per-skill diagnostics (computed on raw, unnormalized advantages)
+                        eps = 1e-8
+                        skill_ids = map_player_state_to_skill(traj_batch.player_state)
+                        counts = jnp.bincount(skill_ids, length=num_heads).astype(jnp.float32)
+                        # approx KL using action log-probs
+                        approx_kl = (traj_batch.log_prob - log_prob)
+                        entropies = pi.entropy()
+                        vloss_per_sample = jnp.maximum(value_losses, value_losses_clipped) * 0.5
+                        adv_sum = jnp.bincount(skill_ids, weights=gae_raw, length=num_heads)
+                        adv_sq_sum = jnp.bincount(skill_ids, weights=gae_raw * gae_raw, length=num_heads)
+                        kl_sum = jnp.bincount(skill_ids, weights=approx_kl, length=num_heads)
+                        ent_sum = jnp.bincount(skill_ids, weights=entropies, length=num_heads)
+                        vloss_sum = jnp.bincount(
+                            skill_ids, weights=vloss_per_sample, length=num_heads
+                        )
+
+                        return total_loss, (
+                            value_loss,
+                            loss_actor,
+                            entropy,
+                            kl_sum,
+                            ent_sum,
+                            vloss_sum,
+                            adv_sum,
+                            adv_sq_sum,
+                            counts,
+                        )
 
                     grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
-                    total_loss, grads = grad_fn(
+                    (out, grads) = grad_fn(
                         train_state.params, traj_batch, advantages, targets
                     )
+                    total_loss, (
+                        _vl,
+                        _la,
+                        _ent,
+                        kl_sum,
+                        ent_sum,
+                        vloss_sum,
+                        adv_sum,
+                        adv_sq_sum,
+                        counts,
+                    ) = out
                     train_state = train_state.apply_gradients(grads=grads)
 
+                    # Update aggregation
+                    agg = {
+                        "kl_sum": agg["kl_sum"] + kl_sum,
+                        "ent_sum": agg["ent_sum"] + ent_sum,
+                        "vloss_sum": agg["vloss_sum"] + vloss_sum,
+                        "adv_sum": agg["adv_sum"] + adv_sum,
+                        "adv_sq_sum": agg["adv_sq_sum"] + adv_sq_sum,
+                        "count_sum": agg["count_sum"] + counts,
+                    }
+
                     losses = (total_loss, 0)
-                    return train_state, losses
+                    return (train_state, agg), losses
 
                 (
                     train_state,
@@ -348,6 +431,7 @@ def make_train(config, prev_model_state=None, return_test_network=False):
                     advantages,
                     targets,
                     rng,
+                    agg_carry,
                 ) = update_state
                 rng, _rng = jax.random.split(rng)
                 batch_size = config["MINIBATCH_SIZE"] * config["NUM_MINIBATCHES"]
@@ -368,8 +452,10 @@ def make_train(config, prev_model_state=None, return_test_network=False):
                     ),
                     shuffled_batch,
                 )
-                train_state, losses = jax.lax.scan(
-                    _update_minbatch, train_state, minibatches
+                # Initialize per-epoch aggregator from carried state
+                agg_init = agg_carry
+                (train_state, agg), losses = jax.lax.scan(
+                    _update_minbatch, (train_state, agg_init), minibatches
                 )
                 update_state = (
                     train_state,
@@ -377,6 +463,7 @@ def make_train(config, prev_model_state=None, return_test_network=False):
                     advantages,
                     targets,
                     rng,
+                    agg,
                 )
                 return update_state, losses
 
@@ -384,14 +471,72 @@ def make_train(config, prev_model_state=None, return_test_network=False):
                 train_state,
                 traj_batch,
                 advantages,
-                targets,
-                rng,
+                    targets,
+                    rng,
+                    {
+                        "kl_sum": jnp.zeros((num_heads,), dtype=jnp.float32),
+                        "ent_sum": jnp.zeros((num_heads,), dtype=jnp.float32),
+                        "vloss_sum": jnp.zeros((num_heads,), dtype=jnp.float32),
+                        "adv_sum": jnp.zeros((num_heads,), dtype=jnp.float32),
+                        "adv_sq_sum": jnp.zeros((num_heads,), dtype=jnp.float32),
+                        "count_sum": jnp.zeros((num_heads,), dtype=jnp.float32),
+                    },
             )
             update_state, loss_info = jax.lax.scan(
                 _update_epoch, update_state, None, config["UPDATE_EPOCHS"]
             )
 
             train_state = update_state[0]
+            agg = update_state[-1]
+            # Per-skill diagnostics (averaged over all epochs and minibatches)
+            counts = jnp.maximum(agg["count_sum"], 1.0)
+            per_skill_kl = agg["kl_sum"] / counts
+            per_skill_entropy = agg["ent_sum"] / counts
+            per_skill_value_loss = agg["vloss_sum"] / counts
+            adv_mean = agg["adv_sum"] / counts
+            adv_var = jnp.maximum(agg["adv_sq_sum"] / counts - adv_mean * adv_mean, 1e-8)
+            adv_std = jnp.sqrt(adv_var)
+
+            skill_ids_full = map_player_state_to_skill(traj_batch.player_state)
+            rewards = traj_batch.reward.astype(jnp.float32)
+            skill_done = traj_batch.info["task_done"].astype(jnp.float32)
+
+            def _skill_reward_scan(carry, inputs):
+                running_sum = carry + inputs[0]
+                done_step = inputs[1]
+                completed_reward = running_sum * done_step
+                running_sum = running_sum * (1.0 - done_step)
+                return running_sum, completed_reward
+
+            init_running = ex_state.get(
+                "skill_reward_running",
+                jnp.zeros((config["NUM_ENVS"],), dtype=jnp.float32),
+            )
+            final_running, completed_rewards = jax.lax.scan(
+                _skill_reward_scan,
+                init_running,
+                (rewards, skill_done),
+            )
+            ex_state = {**ex_state, "skill_reward_running": final_running}
+
+            skill_ids_flat = skill_ids_full.reshape(-1)
+            completed_rewards_flat = completed_rewards.reshape(-1)
+            skill_done_flat = skill_done.reshape(-1)
+            skill_episode_reward_sum = jnp.bincount(
+                skill_ids_flat,
+                weights=completed_rewards_flat,
+                length=num_heads,
+            )
+            skill_episode_counts = jnp.bincount(
+                skill_ids_flat,
+                weights=skill_done_flat,
+                length=num_heads,
+            )
+            per_skill_reward = jnp.where(
+                skill_episode_counts > 0,
+                skill_episode_reward_sum / skill_episode_counts,
+                0.0,
+            )
 
             def process(x, returned_episode, is_special=False, is_nearest=False):
                 # reached_ep = returned_episode
@@ -431,6 +576,15 @@ def make_train(config, prev_model_state=None, return_test_network=False):
             total_weights = traj_batch.info["returned_episode"].sum()
             state_rates = state_occurrences / total_weights
             metric["state_rates"] = state_rates
+            # Attach per-skill diagnostics to metric
+            metric["per_skill_kl"] = per_skill_kl
+            metric["per_skill_entropy"] = per_skill_entropy
+            metric["per_skill_value_loss"] = per_skill_value_loss
+            metric["per_skill_reward"] = per_skill_reward
+            metric["per_skill_adv_mean"] = adv_mean
+            metric["per_skill_adv_std"] = adv_std
+            metric["per_skill_counts"] = counts
+            metric["per_skill_episode_counts"] = skill_episode_counts
             
             # Calculate transition success rate: b/(a+b) where
             # a = transitions from (goal_state-1) to 0 (failure)
@@ -519,7 +673,8 @@ def make_train(config, prev_model_state=None, return_test_network=False):
             ).sum(axis=(-3, -2)) / done_point.sum()
             metric["average_item"] = avg_item
 
-            rng = update_state[-1]
+            # Recover RNG from update_state (index 4); last element is per-skill agg
+            rng = update_state[4]
 
             # wandb logging
             if config["DEBUG"] and config["USE_WANDB"]:
@@ -650,6 +805,38 @@ def run_ppo(config, training_state_i=None):
     print("SPS: ", config["TOTAL_TIMESTEPS"] / (t1 - t0))
     success_rate = float(out["info"]["reached_state"][0][training_state_i])
 
+    # Compute mean episode length over completed episodes and frames-per-success
+    mel = out["info"]["returned_episode_lengths"]
+    # Handle vmapped dimension
+    if hasattr(mel, "shape") and len(mel.shape) > 0:
+        mean_episode_length = float(mel[0])
+    else:
+        mean_episode_length = float(mel)
+    frames_per_success = float(mean_episode_length / success_rate) if success_rate > 0 else None
+
+    # Derive how many updates and timesteps we actually trained
+    try:
+        trained_updates = int(np.array(out["num_steps"][0]))
+    except Exception:
+        try:
+            trained_updates = int(np.array(out["num_steps"]))
+        except Exception:
+            trained_updates = None
+    if trained_updates is not None:
+        trained_timesteps = int(trained_updates * config["NUM_STEPS"] * config["NUM_ENVS"])
+        print(f"Trained updates: {trained_updates}, trained timesteps: {trained_timesteps}")
+        # Stash into config so it is saved alongside the checkpoint
+        config["TRAINED_UPDATES"] = trained_updates
+        config["TRAINED_TIMESTEPS"] = trained_timesteps
+
+    # Persist episode metrics for downstream scheduling/LLM heuristics
+    if mean_episode_length is not None:
+        config["MEAN_EPISODE_LENGTH"] = mean_episode_length
+    if frames_per_success is not None:
+        config["FRAMES_PER_SUCCESS"] = frames_per_success
+    # Persist overall success rate for downstream prompts/metrics
+    config["SUCCESS_RATE"] = success_rate
+
     # Finish wandb run to separate from next training phase
     if config["USE_WANDB"]:
         wandb.finish()
@@ -658,17 +845,29 @@ def run_ppo(config, training_state_i=None):
         train_states = out["runner_state"][rs_index]
         train_state = jax.tree.map(lambda x: x[0], train_states)
         orbax_checkpointer = PyTreeCheckpointer()
-        options = CheckpointManagerOptions(max_to_keep=1, create=True)
-        
+        options = CheckpointManagerOptions(max_to_keep=2, create=True)
+
         # dir_name already contains the full path including "policies"
         checkpoint_manager = CheckpointManager(dir_name, orbax_checkpointer, options)
-        print(f"saved runner state to {dir_name}")
+
+        # Use cumulative timesteps for checkpoint naming to avoid conflicts during continuation
+        # IMPORTANT: Use TOTAL_TIMESTEPS (requested), not trained_timesteps (actual)
+        # This ensures unique checkpoint paths even when training exits early due to success threshold
+        initial_frames = config.get("INITIAL_FRAMES", 0)
+        cumulative_timesteps = initial_frames + int(config["TOTAL_TIMESTEPS"])
+
+        print(f"Saving checkpoint to {dir_name} with cumulative timesteps: {cumulative_timesteps:,} (initial: {initial_frames:,}, new: {trained_timesteps if trained_timesteps is not None else int(config['TOTAL_TIMESTEPS']):,})")
         save_args = orbax_utils.save_args_from_target(train_state)
         checkpoint_manager.save(
-            int(config["TOTAL_TIMESTEPS"]),
+            cumulative_timesteps,
             train_state,
             save_kwargs={"save_args": save_args},
         )
+
+        # CRITICAL: Wait for checkpoint to be fully written to disk before returning
+        # This prevents corruption when training_processor.py immediately tries to load it
+        checkpoint_manager.wait_until_finished()
+        print(f"Checkpoint fully written and synced to disk")
 
     if config["MODULE_PATH"]:
         directory, file_name = os.path.split(config["MODULE_PATH"])
@@ -680,8 +879,14 @@ def run_ppo(config, training_state_i=None):
         os.makedirs(new_directory, exist_ok=True)
         _save_network(0, new_directory + "/policies")
         # save config
-        with open(f"{new_directory}/config.yaml", "w") as f:
+        config_path = f"{new_directory}/config.yaml"
+        print(f"Saving config to: {config_path}")
+        print(f"Config contains {len(config)} keys: {list(config.keys())[:10]}...")
+        with open(config_path, "w") as f:
             yaml.dump(config, f)
+            f.flush()
+            os.fsync(f.fileno())
+        print(f"Config saved successfully to: {config_path}")
     else:
         assert 0, "should be in module path"
 
@@ -748,11 +953,25 @@ if __name__ == "__main__":
     parser.add_argument(
         "--module_path", type=str, default="/home/renos/flow-rl/exp/premade/1.py"
     )
+    parser.add_argument(
+        "--prev_module_path", type=str, default=None,
+        help="Optional: path to previous module .py to restore seed policies from (<stem>_policies/policies/)."
+    )
     # what sucdess rate to achieve before optimizing next node
     parser.add_argument("--success_state_rate", type=float, default=0.8)
 
     parser.add_argument("--success_state", type=int)
     parser.add_argument("--intrinsics-reward", action="store_true", help="Add intrinsics (hunger/thirst/fatigue) to reward")
+
+    # Normalization controls
+    parser.add_argument("--per_skill_adv_norm", action=argparse.BooleanOptionalAction, default=False,
+                        help="Normalize advantages per-skill (based on current skill id) instead of globally.")
+    parser.add_argument("--per_skill_adv_min_count", type=int, default=32,
+                        help="Min samples required per-skill within a minibatch to use per-skill normalization; otherwise fall back to global.")
+
+    # Continuation training
+    parser.add_argument("--initial_frames", type=int, default=0,
+                        help="Initial frame count for continuation training (used for cumulative checkpoint naming).")
 
     args, rest_args = parser.parse_known_args(sys.argv[1:])
     if rest_args:

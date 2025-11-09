@@ -20,13 +20,73 @@ def create_log_dict(info, config):
         for i, state in enumerate(info["reached_state"]):
             to_log[f"state_{i}_reached_prob"] = state
 
+    # Per-skill diagnostics (log only if present)
+    if "per_skill_kl" in info:
+        for i, v in enumerate(info["per_skill_kl"]):
+            to_log[f"per_skill_kl_{i}"] = v
+            to_log[f"skill_{i}/kl"] = v
+    if "per_skill_entropy" in info:
+        for i, v in enumerate(info["per_skill_entropy"]):
+            to_log[f"per_skill_entropy_{i}"] = v
+            to_log[f"skill_{i}/entropy"] = v
+    if "per_skill_value_loss" in info:
+        for i, v in enumerate(info["per_skill_value_loss"]):
+            to_log[f"per_skill_value_loss_{i}"] = v
+            to_log[f"skill_{i}/value_loss"] = v
+    if "per_skill_reward" in info:
+        for i, v in enumerate(info["per_skill_reward"]):
+            to_log[f"per_skill_reward_{i}"] = v
+            to_log[f"skill_{i}/reward"] = v
+    if "per_skill_adv_mean" in info:
+        for i, v in enumerate(info["per_skill_adv_mean"]):
+            to_log[f"per_skill_adv_mean_{i}"] = v
+            to_log[f"skill_{i}/adv_mean"] = v
+    if "per_skill_adv_std" in info:
+        for i, v in enumerate(info["per_skill_adv_std"]):
+            to_log[f"per_skill_adv_std_{i}"] = v
+            to_log[f"skill_{i}/adv_std"] = v
+    if "per_skill_counts" in info:
+        for i, v in enumerate(info["per_skill_counts"]):
+            to_log[f"per_skill_counts_{i}"] = v
+            to_log[f"skill_{i}/count"] = v
+    if "per_skill_episode_counts" in info:
+        for i, v in enumerate(info["per_skill_episode_counts"]):
+            to_log[f"per_skill_episode_counts_{i}"] = v
+            to_log[f"skill_{i}/episode_count"] = v
+    if "per_skill_success_rate" in info:
+        for i, v in enumerate(info["per_skill_success_rate"]):
+            to_log[f"per_skill_success_rate_{i}"] = v
+            to_log[f"skill_{i}/success_rate"] = v
+    if "per_skill_success_rate_batch" in info:
+        for i, v in enumerate(info["per_skill_success_rate_batch"]):
+            to_log[f"per_skill_success_rate_batch_{i}"] = v
+            to_log[f"skill_{i}/success_rate_batch"] = v
+    if "per_skill_successes" in info:
+        for i, v in enumerate(info["per_skill_successes"]):
+            to_log[f"per_skill_successes_{i}"] = v
+            to_log[f"skill_{i}/successes"] = v
+    if "per_skill_failures" in info:
+        for i, v in enumerate(info["per_skill_failures"]):
+            to_log[f"per_skill_failures_{i}"] = v
+            to_log[f"skill_{i}/failures"] = v
+    if "per_skill_total_transitions" in info:
+        for i, v in enumerate(info["per_skill_total_transitions"]):
+            to_log[f"per_skill_total_transitions_{i}"] = v
+            to_log[f"skill_{i}/total_transitions"] = v
+
     # Add transition success metrics
     if "transition_success_rate" in info:
         to_log["transition_success_rate"] = info["transition_success_rate"]
     if "failure_transitions" in info:
-        to_log["failure_transitions"] = info["failure_transitions"] 
+        to_log["failure_transitions"] = info["failure_transitions"]
     if "success_transitions" in info:
         to_log["success_transitions"] = info["success_transitions"]
+
+    # Progressive curriculum metrics
+    if "progressive_reset_state" in info:
+        to_log["progressive_reset_state"] = info["progressive_reset_state"]
+    if "progressive_threshold_met" in info:
+        to_log["progressive_threshold_met"] = info["progressive_threshold_met"]
 
     sum_achievements = 0
     for k, v in info.items():

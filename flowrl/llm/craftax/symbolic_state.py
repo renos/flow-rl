@@ -10,7 +10,7 @@ explicit frontier tracking and pre-policy verification as described in the SCALA
 from typing import Dict, Set, List, Tuple, Optional
 from dataclasses import dataclass, field
 
-from craftax.craftax.constants import Achievement
+from craftax.craftax.constants import Achievement, MONSTERS_KILLED_TO_CLEAR_LEVEL
 
 
 # Inventory entries that represent tier indices rather than counts
@@ -56,13 +56,16 @@ class SymbolicState:
     inventory: Dict[str, int] = field(default_factory=dict)
     achievements: Set[int] = field(default_factory=set)  # Achievement enum values
     levels: Dict[str, int] = field(default_factory=dict)  # level_type -> level_value
+    # Auxiliary, read-only for planning: per-floor monster kill counts (len=num_levels, typically 9)
+    monsters_killed_by_level: Tuple[int, ...] = field(default_factory=tuple)
 
     def __hash__(self):
         """Make SymbolicState hashable for use in sets"""
         return hash((
             tuple(sorted(self.inventory.items())),
             tuple(sorted(self.achievements)),
-            tuple(sorted(self.levels.items()))
+            tuple(sorted(self.levels.items())),
+            self.monsters_killed_by_level,
         ))
 
     def __eq__(self, other):
@@ -71,14 +74,16 @@ class SymbolicState:
             return False
         return (self.inventory == other.inventory and
                 self.achievements == other.achievements and
-                self.levels == other.levels)
+                self.levels == other.levels and
+                self.monsters_killed_by_level == other.monsters_killed_by_level)
 
     def copy(self):
         """Create a deep copy of this state"""
         return SymbolicState(
             inventory=self.inventory.copy(),
             achievements=self.achievements.copy(),
-            levels=self.levels.copy()
+            levels=self.levels.copy(),
+            monsters_killed_by_level=tuple(self.monsters_killed_by_level),
         )
 
 
@@ -282,6 +287,19 @@ def abstract_state(env_state) -> SymbolicState:
     for stat_field in stat_fields:
         if hasattr(env_state, stat_field):
             symbolic.levels[stat_field] = int(getattr(env_state, stat_field))
+
+    # Extract per-floor monsters killed (auxiliary context only)
+    try:
+        if hasattr(env_state, 'monsters_killed'):
+            # Convert to simple tuple of ints for hashability
+            mk = tuple(int(x) for x in list(env_state.monsters_killed))
+            symbolic.monsters_killed_by_level = mk
+        else:
+            # Default to 9 floors of zeros if not available
+            symbolic.monsters_killed_by_level = tuple([0] * 9)
+    except Exception:
+        # Be robust to unexpected shapes
+        symbolic.monsters_killed_by_level = tuple([0] * 9)
 
     return symbolic
 
@@ -591,6 +609,7 @@ def get_frontier_summary(reachable_states: Set[SymbolicState]) -> str:
     max_inventory = {}
     all_achievements = set()
     max_levels = {}
+    monsters_killed_by_level = None
 
     for state in reachable_states:
         # Track maximum inventory levels
@@ -603,6 +622,9 @@ def get_frontier_summary(reachable_states: Set[SymbolicState]) -> str:
         # Track maximum levels
         for stat, level in state.levels.items():
             max_levels[stat] = max(max_levels.get(stat, 0), level)
+        # Record monsters killed vector (identical across reachable states in current abstraction)
+        if state.monsters_killed_by_level:
+            monsters_killed_by_level = state.monsters_killed_by_level
 
     # Achievement name mapping for better readability
     achievement_names = {
@@ -667,6 +689,14 @@ def get_frontier_summary(reachable_states: Set[SymbolicState]) -> str:
         summary += "\n**Maximum Levels:**\n"
         for stat, level in sorted(max_levels.items()):
             summary += f"- {stat}: {level}\n"
+
+    # Dungeon progress (auxiliary context)
+    if monsters_killed_by_level is not None and len(monsters_killed_by_level) > 0:
+        summary += "\n**Dungeon Progress (per floor):**\n"
+        summary += f"- monsters_killed_by_level: {list(monsters_killed_by_level)}\n"
+        cleared = [i for i, c in enumerate(monsters_killed_by_level) if c >= MONSTERS_KILLED_TO_CLEAR_LEVEL]
+        if cleared:
+            summary += f"- floors_cleared (≥{MONSTERS_KILLED_TO_CLEAR_LEVEL} kills): {cleared}\n"
 
     summary += f"\n**Frontier Statistics:**\n"
     summary += f"- Total reachable states: {len(reachable_states)}\n"

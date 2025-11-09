@@ -1,5 +1,28 @@
 # Parallel Skill Learning: Implementation Plan
 
+## Current Status
+
+**Last Updated**: 2025-10-06
+
+**Phase 1**: ✅ COMPLETE (infrastructure for tracking training vs completed skills)
+**Phase 2**: ✅ COMPLETE (frontier-based dependency detection)
+**Phase 3**: ⏸️ PENDING (tmux orchestration & checkpoint merging)
+**Phase 4**: ⏸️ PENDING (integration & testing)
+**Phase 5**: ⏸️ PENDING (monitoring & debugging)
+
+**Recent Changes** (Phase 2):
+- Modified `verify_skill_frontier_compliance()` to use all skills (completed + training) during LLM generation
+- Added `check_frontier_blocked()` method to Flow class for post-generation frontier blocking detection
+- Now properly distinguishes between skills that are independent vs dependent on training skills
+
+**Phase 1 Changes**:
+- Added `self.training_skills = {}` to Flow class for tracking in-progress skills
+- Modified prompts to show currently training skills
+- Added `on_skill_complete()` method to move skills from training to completed
+- Updated prompts with instruction to prefer independent skills
+
+---
+
 ## Overview
 
 Extend the bottom-up skill learning system to propose multiple skills per iteration and train independent skills in parallel using tmux sessions.
@@ -139,99 +162,63 @@ exp/bottom_up/
 
 ### 2. Modified Single-Skill Generation (`flowrl/llm/flow.py`)
 
-**Current**: `next_skill() -> (skill_name, skill_data)`
-**New**: `next_skill_or_wait(currently_training) -> (skill_name, skill_data) | "WAIT"`
+**Current**: `next_skill() -> (skill_name, skill_data)` ✅ Already exists!
+**Changes**: Add `training_skills` tracking (6 lines total)
 
-**Key Idea**: Augment the existing prompt with context about what's training, let LLM decide:
-- Propose a new skill (independent or depends on completed skills only)
-- Return "WAIT" if all feasible next skills depend on currently-training skills
+**What's Already There**:
+- ✅ `self.skills = {}` (line 21)
+- ✅ `self.db['skills_without_code']` populated (line 165)
+- ✅ Validation loop with error retry (lines 166-178)
+- ✅ Skill extraction and return (lines 189-200)
+
+**What to Add**:
 
 ```python
 class Flow:
-    def next_skill_or_wait(self, currently_training: List[str] = None):
-        """
-        Generate next skill, or return 'WAIT' if blocked by in-progress skills.
+    def __init__(self, args):
+        # ... existing init ...
+        self.skills = {}  # Already exists
+        self.training_skills = {}  # ADD THIS LINE
 
-        Args:
-            currently_training: List of skill names currently being trained
+    def next_skill(self):
+        """Generate next skill (same signature as before)"""
+        # ... existing code ...
+        self.db['skills_without_code'] = {...}  # Already exists
 
-        Returns:
-            (skill_name, skill_data) if a new skill is possible
-            "WAIT" if we should wait for training skills to complete
-        """
-        currently_training = currently_training or []
-
-        # Add context to database for prompt
-        self.db["currently_training_skills"] = currently_training
-        self.db["completed_skills"] = list(self.skills.keys())
-
-        # Generate skill (LLM sees both lists in prompt)
-        # Prompt will be modified to include instruction:
-        # "You can propose a skill that depends ONLY on completed skills.
-        #  If all valuable next skills require currently-training skills,
-        #  respond with: WAIT: <skill_name> (reason: need X to finish)"
-
-        error = "Not generated yet"
-        while error != "":
-            try:
-                evaluated = self.graph.evaluate()
-                generated_code = evaluated[list(evaluated.keys())[-1]]
-
-                # Check for WAIT response
-                if generated_code.strip().startswith("WAIT:"):
-                    reason = generated_code.strip()
-                    print(f"LLM decided to wait: {reason}")
-                    return "WAIT", {"reason": reason}
-
-                # Validate as normal
-                functions, error = self.validate_code(generated_code)
-                if error != "":
-                    print(f"Error generating: {error}")
-            except RestartGraphException as e:
-                print(f"Graph restart requested: {e}")
-                continue
-
-        # Extract skill info
-        skill_name = self.db["current"]["skill_name"]
-        skill_with_consumption = self.db["current"]["skill_with_consumption"]
-
-        skill_data = {
-            "skill_name": skill_name,
-            "skill_with_consumption": skill_with_consumption,
-            "functions": functions,
-            "iteration": len(self.skills)  # Use skill count instead of current_i
+        # ADD THIS: Show training skills too
+        self.db['training_skills_without_code'] = {
+            key: value["skill_with_consumption"]
+            for key, value in self.training_skills.items()
         }
 
+        # ... rest of existing generation code ...
+
+        # ADD THIS: Store in training_skills instead of self.skills
+        self.training_skills[skill_name] = skill_data
+
         return skill_name, skill_data
+
+    def on_skill_complete(self, skill_name):  # NEW METHOD
+        """Move skill from training to completed"""
+        if skill_name in self.training_skills:
+            skill_data = self.training_skills.pop(skill_name)
+            self.skills[skill_name] = skill_data
+            self.db["skills"][skill_name] = skill_data
 ```
 
-**Prompt Modification** (in `flowrl/llm/craftax_classic/prompts/main.py`):
+**Prompt Modification** (in `flowrl/llm/craftax/prompts/main.py`):
 
+Add after line 194:
 ```python
-# Add to next_task prompt
-"""
-## Context
+Currently Training Skills (do NOT propose duplicates):
+```
+$db.training_skills_without_code$
+```
+```
 
-**Completed Skills:**
-{db[completed_skills]}
-
-**Currently Training Skills (DO NOT depend on these):**
-{db[currently_training_skills]}
-
-## Instructions
-
-You may propose a skill that:
-1. Is independent (no requirements), OR
-2. Depends ONLY on completed skills (not currently-training skills)
-
-If the most valuable next skills ALL require currently-training skills to complete,
-respond with:
-
-WAIT: <skill_name_we_need_to_wait_for>
-Reason: <why we need to wait>
-
-Otherwise, generate a skill as normal.
-"""
+Add after line 231:
+```python
+- PREFER skills that don't depend on currently training skills (only depend on them if no other valuable skills exist)
 ```
 
 ---
@@ -548,45 +535,67 @@ class SkillScheduler:
         print(f"[Status] Waiting: {waiting} | Running: {running}/{self.max_parallel} | " +
               f"Completed: {completed} | Failed: {failed}")
 
-    def merge_checkpoints(self) -> dict:
+    def _merge_skill_checkpoint(self, skill_id: str):
         """
-        Merge checkpoints from all successful skills.
+        Merge a completed skill's checkpoint into the global checkpoint.
 
-        Returns:
-            Merged checkpoint dict
+        Handles conflicts by keeping expert versions trained on the most frames.
         """
-        merged = {
-            "skills": {},
-            "db": {},
-            "wave_id": self.wave_id
-        }
+        skill = self.state["skills"][skill_id]
+        skill_dir = Path(skill["skill_dir"])
+        ckpt_path = skill_dir / "checkpoint.pkl"
 
-        for skill in self.metadata["skills"]:
-            if skill["status"] == "completed":
-                ckpt_path = Path(skill["skill_dir"]) / "checkpoint.pkl"
-
-                if ckpt_path.exists():
-                    import pickle
-                    with open(ckpt_path, 'rb') as f:
-                        skill_ckpt = pickle.load(f)
-
-                    # Merge skills
-                    merged["skills"].update(skill_ckpt.get("skills", {}))
-
-                    # Merge db (careful with conflicts)
-                    for key, value in skill_ckpt.get("db", {}).items():
-                        if key not in ["prompts", "temp_prompts"]:
-                            merged["db"][key] = value
-
-        # Save merged checkpoint
-        merged_path = self.wave_dir.parent / "checkpoints" / f"wave_{self.wave_id}_merged.pkl"
-        merged_path.parent.mkdir(parents=True, exist_ok=True)
+        if not ckpt_path.exists():
+            print(f"Warning: Checkpoint not found for {skill_id}")
+            return
 
         import pickle
-        with open(merged_path, 'wb') as f:
-            pickle.dump(merged, f)
+        with open(ckpt_path, 'rb') as f:
+            skill_ckpt = pickle.load(f)
 
-        return merged
+        # Load global checkpoint
+        global_ckpt_path = self.base_dir / "checkpoints" / "global_latest.pkl"
+        if global_ckpt_path.exists():
+            with open(global_ckpt_path, 'rb') as f:
+                global_ckpt = pickle.load(f)
+        else:
+            global_ckpt = {
+                "skills": {},
+                "expert_params": {},
+                "expert_frame_counts": {},  # Track frames per expert
+                "db": {}
+            }
+
+        # Merge skill experts with frame-count heuristic
+        skill_experts = skill_ckpt.get("expert_params", {})
+        skill_frame_counts = skill_ckpt.get("expert_frame_counts", {})
+
+        for expert_name, expert_params in skill_experts.items():
+            skill_frames = skill_frame_counts.get(expert_name, 0)
+            global_frames = global_ckpt["expert_frame_counts"].get(expert_name, 0)
+
+            # Keep version trained on more frames
+            if skill_frames > global_frames:
+                global_ckpt["expert_params"][expert_name] = expert_params
+                global_ckpt["expert_frame_counts"][expert_name] = skill_frames
+                print(f"  Updated {expert_name}: {global_frames} -> {skill_frames} frames")
+            else:
+                print(f"  Kept existing {expert_name}: {global_frames} frames (skill had {skill_frames})")
+
+        # Add new skill metadata
+        global_ckpt["skills"].update(skill_ckpt.get("skills", {}))
+
+        # Merge db
+        for key, value in skill_ckpt.get("db", {}).items():
+            if key not in ["prompts", "temp_prompts"]:
+                global_ckpt["db"][key] = value
+
+        # Save updated global checkpoint
+        global_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(global_ckpt_path, 'wb') as f:
+            pickle.dump(global_ckpt, f)
+
+        print(f"  Merged {skill_id} into global checkpoint")
 
     def _get_session_name(self, skill_idx, skill_name):
         """Generate tmux session name."""
@@ -681,7 +690,7 @@ class SkillScheduler:
 
 ### 5. Event-Driven Bottom-Up Loop (`flowrl/bottomup.py`)
 
-**Key Changes**: Reactive generation triggered by skill completions
+**Key Changes**: Reactive generation with programmatic frontier detection
 
 ```python
 # OLD (current - sequential)
@@ -707,6 +716,7 @@ scheduler_thread.start()
 # Event-driven generation loop
 total_skills_generated = 0
 last_completed_count = 0
+frontier_blocked = False
 
 print(f"Starting event-driven skill generation (max: {args.max_nodes})")
 
@@ -714,54 +724,76 @@ while total_skills_generated < args.max_nodes or not scheduler._is_complete():
     # Check if we have available GPU slots
     available_slots = scheduler.max_parallel - len(scheduler.state["currently_running"])
 
-    # Only try to generate if we have slots OR if nothing is running (initial state)
-    if available_slots > 0 or len(scheduler.state["currently_running"]) == 0:
+    # Try to generate if:
+    # 1. We have available slots
+    # 2. Frontier is not blocked (last skill didn't depend on training)
+    if (available_slots > 0 or len(scheduler.state["currently_running"]) == 0) and not frontier_blocked:
         # Get currently training skill names
-        currently_training = [
+        currently_training_names = [
             scheduler.state["skills"][sid]["skill_name"]
             for sid in scheduler.state["currently_running"]
         ]
 
-        # Try to generate next skill
+        # Generate next skill
         print(f"\nAttempting to generate skill #{total_skills_generated + 1}...")
         print(f"  Available slots: {available_slots}/{scheduler.max_parallel}")
-        print(f"  Currently training: {currently_training}")
+        print(f"  Currently training: {currently_training_names}")
 
-        result = flow_graph.next_skill_or_wait(currently_training)
+        skill_name, skill_data = flow_graph.next_skill()
+        # Note: skill is now in flow_graph.training_skills
 
-        if result[0] == "WAIT":
-            # LLM says we need to wait for in-progress skills
-            reason = result[1]["reason"]
-            print(f"  → LLM says WAIT: {reason}")
-            print(f"  → Pausing generation until a skill completes...")
+        # Determine dependencies (check against ALL skills: completed + training)
+        all_skills = {**flow_graph.skills, **flow_graph.training_skills}
+        dependencies = analyzer.get_dependencies(skill_name, all_skills)
+
+        # FRONTIER CHECK: Does this skill depend on currently training skills?
+        training_skill_names = list(flow_graph.training_skills.keys())
+        depends_on_training = any(dep in training_skill_names for dep in dependencies)
+
+        if depends_on_training:
+            # Frontier is blocked!
+            blocking_deps = [d for d in dependencies if d in training_skill_names]
+            print(f"  → Generated: {skill_name}")
+            print(f"  → Dependencies: {dependencies}")
+            print(f"  → FRONTIER BLOCKED: Depends on training skills {blocking_deps}")
+            print(f"  → Pausing generation until skills complete...")
+
+            # Add to scheduler (will launch when deps satisfied)
+            scheduler.add_skill(skill_name, skill_data, dependencies)
+            total_skills_generated += 1
+
+            # Set flag to stop generating
+            frontier_blocked = True
         else:
-            # Got a new skill!
-            skill_name, skill_data = result
-
-            # Add to flow graph
-            flow_graph.add_skill(skill_name, skill_data)
-
-            # Determine dependencies
-            dependencies = analyzer.get_dependencies(skill_name, flow_graph.skills)
+            # Independent skill or depends only on completed - frontier not blocked
+            print(f"  → Generated: {skill_name} (deps: {dependencies})")
 
             # Add to scheduler queue
             scheduler.add_skill(skill_name, skill_data, dependencies)
-
             total_skills_generated += 1
-            print(f"  → Generated: {skill_name} (deps: {dependencies})")
 
-            # Try to generate another immediately if we still have slots
+            # Try to generate another immediately (loop continues)
             continue
 
-    # Wait a bit before checking again
+    # Wait and monitor
     time.sleep(args.scheduler_poll_interval)
 
-    # Print status periodically
+    # Check if any skills completed
     completed_count = sum(1 for s in scheduler.state["skills"].values()
                          if s["status"] == "completed")
     if completed_count > last_completed_count:
         last_completed_count = completed_count
         print(f"\n[Progress] {completed_count}/{total_skills_generated} skills completed")
+
+        # Move completed skills from training to completed
+        for skill_id, skill_info in scheduler.state["skills"].items():
+            if skill_info["status"] == "completed":
+                skill_name = skill_info["skill_name"]
+                flow_graph.on_skill_complete(skill_name)
+
+        # Frontier may be unblocked now - resume generation
+        frontier_blocked = False
+        print(f"  → Frontier unblocked - resuming generation")
 
 # Wait for all skills to finish
 print("\nAll skills generated. Waiting for training to complete...")
@@ -773,57 +805,174 @@ print(f"Final checkpoint: {args.graph_path}/checkpoints/global_latest.pkl")
 
 **How It Works**:
 
-1. **Initial state**: Generate skills until all GPU slots are full
-2. **When a skill completes**:
-   - Scheduler merges checkpoint
-   - Launches any waiting skills with satisfied dependencies
-   - Main loop detects available slot → tries to generate another
-3. **LLM decision**:
-   - If new independent skill is possible → generate it
-   - If all good skills need in-progress skills → return "WAIT"
-4. **Wait state**: Main loop idles, only scheduler is active
-5. **Resume**: When next skill completes, available_slots > 0, try generation again
+1. **Initial state**: Generate skills greedily
+2. **After each generation**:
+   - Check dependencies programmatically
+   - If depends on training skills → **frontier blocked** → stop generating
+   - If independent → continue generating
+3. **When a skill completes**:
+   - Move from `training_skills` to `skills`
+   - **Unblock frontier** → resume generation
+   - Scheduler also launches any waiting skills with satisfied dependencies
+4. **No LLM "WAIT" decision**: We detect blocking programmatically (simpler, cheaper, more reliable)
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Reactive Skill Generation (Week 1)
-- [ ] Implement `Flow.next_skill_or_wait(currently_training)` method
-- [ ] Modify prompts to include:
-  - List of completed skills
-  - List of currently training skills
-  - WAIT instruction and format
-- [ ] Test LLM decision-making:
-  - Empty state → proposes skill
-  - All slots full, no dependencies possible → returns WAIT
-  - Some slots full, independent skill exists → proposes skill
-- [ ] Validate WAIT response parsing
+### Phase 1: Separate Training Skills ✅ COMPLETE
 
-**Deliverable**: Modified `Flow` class that can generate skills reactively or signal to wait
+**Already Implemented** ✅:
+- `next_skill()` method with validation loop
+- `self.skills = {}` dictionary
+- `self.db['skills_without_code']` populated
+- Prompts show "Existing Skills: $db.skills_without_code$"
+- Frontier checking and duplicate prevention
+- Instructions: "Do NOT propose skills that already exist"
+
+**Changes Completed** ✅:
+- [x] Add `self.training_skills = {}` to `Flow.__init__()` in `flowrl/llm/flow.py:78`
+- [x] Populate `self.db['training_skills_without_code']` in `next_skill()` at `flowrl/llm/flow.py:167`
+- [x] Update `flowrl/llm/craftax/prompts/main.py:196-199`:
+  ```python
+  Currently Training Skills (do NOT propose duplicates):
+  ```
+  $db.training_skills_without_code$
+  ```
+  ```
+- [x] Add instruction line at `flowrl/llm/craftax/prompts/main.py:239`:
+  ```
+  - PREFER skills that don't depend on currently training skills (only depend on them if no other valuable skills exist)
+  ```
+- [x] Add `on_skill_complete(skill_name)` method to `Flow` class at `flowrl/llm/flow.py:204-210`:
+  ```python
+  def on_skill_complete(self, skill_name):
+      """Move skill from training to completed when training finishes"""
+      if skill_name in self.training_skills:
+          skill_data = self.training_skills.pop(skill_name)
+          self.skills[skill_name] = skill_data
+          self.db["skills"][skill_name] = skill_data
+          print(f"Skill '{skill_name}' completed and moved to skills database")
+  ```
+- [ ] Test: Generate skill with training skills visible, verify no duplicates proposed
+
+**Deliverable**: ✅ `Flow` tracks training vs completed skills separately (6 lines of changes)
 
 ---
 
-### Phase 2: Dependency Analysis (Week 1-2)
-- [ ] Implement `DependencyAnalyzer` class
-- [ ] Write unit tests for `get_dependencies()`
-- [ ] Test with real skill examples from Craftax:
-  - Basic skills (no deps): Collect Wood, Collect Stone
-  - Dependent skills: Make Pickaxe (needs wood + stone)
-  - Transitive deps: Mine Iron (needs pickaxe → wood + stone)
-- [ ] Visualize dependency DAG for debugging
+### Phase 2: Frontier-Based Dependency Detection ✅ COMPLETE
 
-**Deliverable**: Analyzer that correctly identifies skill dependencies
+**Already Implemented** ✅:
+- **Frontier calculation**: `compute_frontier_summary()` in `flowrl/llm/craftax/symbolic_state.py`
+- **Sufficiency checking**: `verify_skill()` in `flowrl/llm/craftax/symbolic_state.py:709`
+  - Converts skills to symbolic operators
+  - Checks if skill is novel (not already achievable)
+  - Checks if skill is feasible (preconditions can be satisfied)
+- **Used in after_queries**: `verify_skill_frontier_compliance()` in `flowrl/llm/craftax/after_queries.py:209`
+  - Currently uses `self.node.db.get("skills", {})` for verification
+  - Returns (is_novel, is_feasible, message)
+
+**How It Works (User Clarification)**:
+
+1. **During LLM generation** (in after_queries):
+   - Use ALL skills (completed + training) for frontier calculation
+   - Ensures LLM sees full reachable frontier
+   - Prevents proposing skills already achievable with training skills
+
+2. **After skill generation** (frontier blocking check):
+   - Re-run sufficiency analysis using ONLY completed skills
+   - If feasible with completed → independent skill → continue generating
+   - If NOT feasible with completed → depends on training → frontier blocked
+
+**Implementation Changes**:
+
+**Change 1: Modify after_queries to use all skills during generation**
+```python
+# In flowrl/llm/craftax/after_queries.py:209
+def verify_skill_frontier_compliance(self, parsed_answer):
+    # ...existing code...
+
+    # Get BOTH completed and training skills for frontier calculation
+    completed_skills = self.node.db.get("skills", {})
+    training_skills = self.node.db.get("training_skills", {})  # ADD THIS
+
+    # Merge for full frontier view
+    all_skills = {**completed_skills, **training_skills}  # ADD THIS
+
+    # Use merged skills for verification
+    is_novel, is_feasible = verify_skill(skill_name, parsed_answer, all_skills, max_capacity)  # CHANGE: use all_skills
+
+    # ...rest of existing code...
+```
+
+**Change 2: Add frontier blocking check in flow.py after generation**
+```python
+# In flowrl/llm/flow.py after next_skill() returns
+
+def check_frontier_blocked(self, skill_name: str, skill_data: dict) -> bool:
+    """
+    Check if skill depends on currently training skills.
+    Returns True if frontier is blocked (skill depends on training).
+    """
+    from flowrl.llm.craftax.symbolic_state import verify_skill
+
+    # Check feasibility using ONLY completed skills
+    max_capacity = 99  # or get from env config
+    _, is_feasible_with_completed = verify_skill(
+        skill_name,
+        skill_data["skill_with_consumption"],
+        self.skills,  # Only completed skills
+        max_capacity
+    )
+
+    # If NOT feasible with completed skills, must depend on training
+    return not is_feasible_with_completed
+```
+
+**Usage in bottomup.py**:
+```python
+# After skill generation
+skill_name, skill_data = flow_graph.next_skill()
+
+# Check if frontier is blocked
+frontier_blocked = flow_graph.check_frontier_blocked(skill_name, skill_data)
+
+if frontier_blocked:
+    print(f"Frontier blocked: {skill_name} depends on training skills")
+    # Add to queue, stop generating
+else:
+    print(f"Frontier open: {skill_name} is independent")
+    # Add to queue, continue generating
+```
+
+**Why This Works**:
+- Uses full execution planning machinery (SkillDependencyResolver under the hood)
+- Handles all edge cases: tiered items, achievements, ephemeral requirements
+- Simple boolean check: feasible with completed? → independent : depends on training
+- No need to track individual dependencies, just binary frontier state
+
+**Changes Completed** ✅:
+- [x] Modified `verify_skill_frontier_compliance()` in `flowrl/llm/craftax/after_queries.py:223-228` to merge completed + training skills
+- [x] Added `check_frontier_blocked()` method in `flowrl/llm/flow.py:212-261` to detect frontier blocking
+
+**Deliverable**: ✅ Two small modifications (~10 lines each) to existing frontier verification
 
 ---
 
-### Phase 3: Tmux Orchestration (Week 2-3)
-- [ ] Implement `ParallelCoordinator` class
+### Phase 3: Tmux Orchestration & Checkpoint Merging (Week 2-3)
+- [ ] Implement `SkillScheduler` class
 - [ ] Test tmux session creation/monitoring
 - [ ] Handle edge cases (crashes, OOM, etc.)
-- [ ] Implement checkpoint merging logic
+- [ ] **Modify `ppo_flow.py` to track frames per expert**:
+  - Add frame counter for each expert head
+  - Save `expert_frame_counts` dict in checkpoint
+- [ ] **Implement frame-count checkpoint merging**:
+  - Load global checkpoint + new skill checkpoint
+  - Compare frame counts for each expert
+  - Keep version with highest frame count
+  - Test with 2 parallel skills that conflict
 
-**Deliverable**: Working parallel training for 2-3 skills
+**Deliverable**: Working parallel training for 2-3 skills with correct checkpoint merging
 
 ---
 
@@ -847,21 +996,71 @@ print(f"Final checkpoint: {args.graph_path}/checkpoints/global_latest.pkl")
 
 ---
 
+## Checkpoint Conflict Resolution
+
+### Problem: Parallel Training Creates Conflicting Expert Updates
+
+**Current Sequential Behavior**:
+When training a new skill, ALL previous MoE experts get updated (continual learning). This works fine sequentially:
+```
+Train skill_0 → experts: {0}
+Train skill_1 → experts: {0', 1}  (skill_0 expert updated during skill_1 training)
+Train skill_2 → experts: {0'', 1', 2}  (all previous updated)
+```
+
+**Parallel Conflict**:
+If skills A, B, C train in parallel from base checkpoint `{0, 1, 2}`:
+```
+Skill_A training: {0, 1, 2} → {0', 1', 2', A}
+Skill_B training: {0, 1, 2} → {0'', 1'', 2'', B}
+Skill_C training: {0, 1, 2} → {0''', 1''', 2''', C}
+
+Conflict: Which version of experts {0, 1, 2} to keep?
+```
+
+### Solution: Frame-Count Heuristic
+
+**During checkpoint merging**:
+1. Track total frames trained for each expert in each checkpoint
+2. When merging, compare frame counts for conflicting experts
+3. Keep the version trained on the most frames
+4. This preserves continual learning while enabling clean parallelism
+
+**Example**:
+```python
+# Skill A trained for 50M frames, updated expert_0 (now at 150M total)
+# Skill B trained for 80M frames, updated expert_0 (now at 180M total)
+# Skill C trained for 30M frames, updated expert_0 (now at 130M total)
+
+# Merge: Keep expert_0 from Skill B (180M > 150M > 130M)
+```
+
+**Benefits**:
+- ✅ Simple, deterministic merging rule
+- ✅ Preserves continual learning (experts still improve)
+- ✅ Bias towards more training = better performance
+- ✅ Minimal implementation complexity
+
+**Implementation**: Modified checkpoint format includes `expert_frame_counts` dict tracking frames per expert.
+
+---
+
 ## Open Questions & Decisions
 
-### 1. LLM WAIT Decision Accuracy
-**Q**: How often will the LLM correctly identify "WAIT" situations?
+### 1. LLM Adherence to "Prefer Independent" Instruction
+**Q**: How often will the LLM propose dependent skills despite instruction?
 
-**Potential Issues**:
-- **False WAIT**: LLM says WAIT when an independent skill is actually possible
-  - Impact: Underutilized GPU, slower throughput
-  - Mitigation: Include examples in prompt showing independent skills
+**Expected Behavior**:
+- Most of the time: LLM proposes independent skills when possible
+- Sometimes: LLM proposes dependent skill (e.g., "Make Pickaxe" when wood/stone are training)
+  - This is actually fine! Programmatic check catches it → frontier blocked
+  - Skill still gets queued, will launch when deps complete
 
-- **Missed WAIT**: LLM proposes skill that depends on in-progress skill
-  - Impact: Skill sits in queue waiting, no harm (scheduler handles it)
-  - Better than false WAIT
+**No Problem**: Even if LLM ignores instruction, programmatic check ensures correctness
+- LLM instruction is an optimization (reduces wasted generations)
+- Programmatic check is the safety net
 
-**Recommendation**: Bias towards proposing skills (conservative WAIT), monitor false WAIT rate
+**Recommendation**: Monitor how often frontier blocks occur, adjust prompt if excessive
 
 ---
 
@@ -1010,7 +1209,7 @@ tmux attach -t flowrl_s1_collect_stone
 cat exp/parallel_test/scheduler_state.json | jq
 ```
 
-**Expected Output** (event-driven, reactive):
+**Expected Output** (event-driven, programmatic frontier detection):
 ```
 Starting event-driven skill generation (max: 20)
 Starting scheduler (max_parallel=3)
@@ -1039,13 +1238,15 @@ Launched: 2_Eat_Food (session: flowrl_s2_Eat_Food)
 Attempting to generate skill #4...
   Available slots: 0/3
   Currently training: ['Collect Wood', 'Collect Stone', 'Eat Food']
-  → LLM says WAIT: Need 'Collect Wood' or 'Collect Stone' to finish for Make Pickaxe
-  → Pausing generation until a skill completes...
-
-[Status] Waiting: 0 | Running: 3/3 | Completed: 0 | Failed: 0
+  → Generated: Make Pickaxe
+  → Dependencies: ['Collect Wood', 'Collect Stone']
+  → FRONTIER BLOCKED: Depends on training skills ['Collect Wood', 'Collect Stone']
+  → Pausing generation until skills complete...
+Added skill: 3_Make_Pickaxe (deps: ['Collect Wood', 'Collect Stone'])
+[Status] Waiting: 1 | Running: 3/3 | Completed: 0 | Failed: 0
 
 [30s later...]
-[Status] Waiting: 0 | Running: 3/3 | Completed: 0 | Failed: 0
+[Status] Waiting: 1 | Running: 3/3 | Completed: 0 | Failed: 0
 
 [45s later - first skill completes!]
 ============================================================
@@ -1055,20 +1256,22 @@ Skill 0_Collect_Wood completed!
 ============================================================
 
 Merging checkpoint: 0_Collect_Wood -> global_latest.pkl
-[Status] Waiting: 0 | Running: 2/3 | Completed: 1 | Failed: 0
+[Progress] 1/4 skills completed
+  → Frontier unblocked - resuming generation
 
-Attempting to generate skill #4...
+Attempting to generate skill #5...
   Available slots: 1/3
   Currently training: ['Collect Stone', 'Eat Food']
   → Generated: Drink Water (deps: [])
-Added skill: 3_Drink_Water (deps: [])
-Launched: 3_Drink_Water (session: flowrl_s3_Drink_Water)
+Added skill: 4_Drink_Water (deps: [])
+Launched: 4_Drink_Water (session: flowrl_s4_Drink_Water)
 
-Attempting to generate skill #5...
+Attempting to generate skill #6...
   Available slots: 0/3
   Currently training: ['Collect Stone', 'Eat Food', 'Drink Water']
-  → LLM says WAIT: Need 'Collect Stone' to finish for Make Pickaxe
-  → Pausing generation until a skill completes...
+  → Generated: Sleep (deps: [])
+Added skill: 5_Sleep (deps: [])
+[Status] Waiting: 2 | Running: 3/3 | Completed: 1 | Failed: 0
 
 [60s later - second skill completes]
 ============================================================
@@ -1078,16 +1281,17 @@ Skill 1_Collect_Stone completed!
 ============================================================
 
 Merging checkpoint: 1_Collect_Stone -> global_latest.pkl
-[Status] Waiting: 0 | Running: 2/3 | Completed: 2 | Failed: 0
+Launched: 3_Make_Pickaxe (session: flowrl_s3_Make_Pickaxe)
+  (dependencies satisfied: Collect Wood ✓, Collect Stone ✓)
+[Progress] 2/6 skills completed
+  → Frontier unblocked - resuming generation
 
-Attempting to generate skill #5...
-  Available slots: 1/3
-  Currently training: ['Eat Food', 'Drink Water']
-  → Generated: Make Pickaxe (deps: ['0_Collect_Wood', '1_Collect_Stone'])
-Added skill: 4_Make_Pickaxe (deps: ['0_Collect_Wood', '1_Collect_Stone'])
-Launched: 4_Make_Pickaxe (session: flowrl_s4_Make_Pickaxe)
-
-[Progress] 2/5 skills completed
+Attempting to generate skill #7...
+  Available slots: 0/3
+  Currently training: ['Eat Food', 'Drink Water', 'Make Pickaxe']
+  → Generated: Collect Coal (deps: [])
+Added skill: 6_Collect_Coal (deps: [])
+[Status] Waiting: 3 | Running: 3/3 | Completed: 2 | Failed: 0
 
 ... continues until all 20 skills generated and trained ...
 
@@ -1125,45 +1329,61 @@ Final checkpoint: exp/parallel_test/checkpoints/global_latest.pkl
 ## Summary: Key Design Decisions
 
 ### Architecture
-✅ **Event-Driven Reactive Generation** (not batch/wave-based)
-- Single skill generated per LLM call
-- LLM sees completed + in-progress skills, decides:
-  - Propose new skill (independent or depends on completed only)
-  - Return "WAIT" if all good skills need in-progress skills
+✅ **Event-Driven with Programmatic Frontier Detection** (not batch/wave-based)
+- Single skill generated per LLM call (same as current)
+- Separate `skills` (completed) from `training_skills` (in-progress)
+- LLM sees both lists in prompts (prevents duplicates, allows dependencies)
+- LLM **instructed** to prefer independent skills (soft constraint)
+- **Programmatic check** after generation detects frontier blocking (hard constraint)
 - Skills launch immediately when dependencies satisfied
 - Maximum GPU utilization through continuous scheduling
 
 ### Components
-1. **`Flow.next_skill_or_wait(currently_training)`** - Reactive single-skill generation
-   - Returns new skill OR "WAIT" signal
-   - LLM makes intelligent decision based on frontier state
+1. **`Flow.next_skill()`** - Minimal changes to existing method
+   - Adds skill to `training_skills` instead of `skills`
+   - Shows both `skills_without_code` and `training_skills_without_code` in prompts
+   - `on_skill_complete()` moves skill from training → completed
 2. **`DependencyAnalyzer`** - Analyze single skill's dependencies
-   - Determines which completed skills this skill requires
+   - Determines which skills this skill requires (by checking gain/requirements)
 3. **`SkillScheduler`** - Continuous job scheduler
    - Maintains: waiting queue, running set, completed set
    - Polls tmux sessions every N seconds
    - Launches skills up to `max_parallel` limit
-4. **Incremental Checkpointing** - Merge as each skill completes
+4. **Frame-Count Checkpoint Merging** - Resolve expert conflicts
+   - Track frames trained per expert
+   - Keep most-trained version when merging
+   - Preserves continual learning with parallelism
 
-### Workflow (Event-Driven)
+### Workflow (Event-Driven with Frontier Detection)
 ```
-1. Check: Do we have available GPU slots?
+1. Check: Do we have available GPU slots AND frontier not blocked?
 2. If yes:
-   a. Call Flow.next_skill_or_wait(currently_training)
-   b. LLM decides:
-      - New skill possible → generate it, add to queue
-      - All skills blocked → return "WAIT"
-   c. If new skill: immediately try to generate another
-   d. If WAIT: pause generation, let scheduler work
+   a. Call Flow.next_skill() (generates one skill)
+   b. Check dependencies programmatically
+   c. If depends on training_skills:
+      - FRONTIER BLOCKED → add to queue → STOP generating
+   d. If independent or depends only on completed:
+      - Add to queue → continue generating
 3. Scheduler continuously:
    - Monitors tmux sessions
    - Merges completed checkpoints
    - Launches newly-runnable skills
 4. When skill completes:
-   - Free up GPU slot
+   - Move from training_skills to skills
+   - Unblock frontier
    - Main loop resumes generation attempts
 5. Repeat until max_nodes reached
 ```
+
+### Frontier Blocking Logic
+**When to stop generating:**
+- Generate skill
+- Check: does it require anything from `training_skills`?
+- YES → frontier blocked (all reachable skills need in-progress work)
+- NO → frontier open (continue generating)
+
+**When to resume:**
+- Any skill completes → move to `skills` → frontier unblocked
 
 ### Key Parameters
 - `--max_parallel_skills`: GPU slots (e.g., 3 for single GPU)
@@ -1175,4 +1395,4 @@ Final checkpoint: exp/parallel_test/checkpoints/global_latest.pkl
 - **Higher GPU utilization** (~85-95% vs ~33% in sequential)
 - **Lower latency** for fast skills (don't wait for slow ones)
 - **Fault isolation** (failures don't block unrelated skills)
-- **Intelligent blocking** (LLM decides when to wait vs propose)
+- **Simple & reliable** (programmatic check, no LLM decision needed)

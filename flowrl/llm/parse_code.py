@@ -1,4 +1,5 @@
 import ast
+import textwrap
 
 import numpy as np
 import json
@@ -9,7 +10,7 @@ import re
 
 def get_function_name_and_arguments(code_string):
     # Parse the code string into an AST
-    module = ast.parse(code_string)
+    module = ast.parse(textwrap.dedent(code_string))
 
     # Find the function definitions
     function_defs = [node for node in module.body if isinstance(node, ast.FunctionDef)]
@@ -78,10 +79,9 @@ def process_generated_code(
         current_indent = len(line) - len(stripped_line)
 
         if re.match(r"def .+\(.*\):", stripped_line):  # New function definition
-            if (
-                function_lines
-            ):  # If we've been collecting lines, save the current function
-                functions.append("\n".join(function_lines))
+            if function_lines:  # If we've been collecting lines, save the current function
+                func_str = "\n".join(function_lines)
+                functions.append(textwrap.dedent(func_str))
                 function_lines = []  # Clear function lines
 
             indent = current_indent  # Update the indentation level
@@ -111,7 +111,8 @@ def process_generated_code(
             function_lines.append(line)  # Add the line to the current function block
     # handle case where the file ends but we're still in a function
     if function_lines:
-        functions.append("\n".join(function_lines))
+        func_str = "\n".join(function_lines)
+        functions.append(textwrap.dedent(func_str))
 
     for function in functions:
         print(function)
