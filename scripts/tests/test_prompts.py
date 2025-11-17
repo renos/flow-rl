@@ -14,7 +14,7 @@ from flowrl.llm.craftax_classic.llm import generate_graph
 from flowrl.llm.craftax_classic.generate_code import validate_code, create_inventory_from_array
 from flowrl.skill_dependency_resolver import SkillDependencyResolver
 from flowrl.skill_depenency_resolver_new import SymbolicSkillDependencyResolver
-from flowrl.skill_dependency_resolver_unified import UnifiedPlanningSkillResolver
+#from flowrl.skill_dependency_resolver_unified import UnifiedPlanningSkillResolver
 import numpy as np
 import json
 
@@ -674,6 +674,7 @@ class PromptTester:
         use_symbolic_state=False,
         use_unified_planner=False,
         initial_symbolic_state=None,
+        inline_ephemeral=False,
     ):
         """Resolve dependencies for a skill and return the execution order.
 
@@ -684,6 +685,7 @@ class PromptTester:
             use_symbolic_state: When True, plan over the richer symbolic state representation
             use_unified_planner: When True, use the Unified Planning Library (much simpler!)
             initial_symbolic_state: Optional `SymbolicState` to seed the symbolic resolver
+            inline_ephemeral: Whether to inline ephemeral skills (default: False, keeps them in execution order)
 
         Returns:
             List of nodes/skills in execution order to fulfill the target skill
@@ -704,7 +706,7 @@ class PromptTester:
                 initial_state=initial_symbolic_state,
             )
             execution_order = resolver.resolve_dependencies(
-                skill_name, n, initial_state=initial_symbolic_state
+                skill_name, n, initial_state=initial_symbolic_state, inline_ephemeral=inline_ephemeral
             )
         elif use_symbolic_state:
             resolver = SymbolicSkillDependencyResolver(
@@ -713,13 +715,13 @@ class PromptTester:
                 initial_state=initial_symbolic_state,
             )
             execution_order = resolver.resolve_dependencies(
-                skill_name, n, initial_state=initial_symbolic_state
+                skill_name, n, initial_state=initial_symbolic_state, inline_ephemeral=inline_ephemeral
             )
         else:
             resolver = SkillDependencyResolver(
                 self.db["skills"], max_inventory_capacity
             )
-            execution_order = resolver.resolve_dependencies(skill_name, n)
+            execution_order = resolver.resolve_dependencies(skill_name, n, inline_ephemeral=inline_ephemeral)
 
         return execution_order
 
@@ -823,6 +825,7 @@ class PromptTester:
         use_unified_planner=False,
         initial_symbolic_state=None,
         test_frontier=False,
+        inline_ephemeral=False,
     ):
         """
         Complete workflow: resolve dependencies and write to module file.
@@ -836,6 +839,7 @@ class PromptTester:
             use_unified_planner: When True, use the Unified Planning Library (much simpler!)
             initial_symbolic_state: Optional symbolic state override for planning context
             test_frontier: When True, also run frontier calculation and time it
+            inline_ephemeral: Whether to inline ephemeral skills (default: False, keeps them in execution order)
 
         Returns:
             Tuple of (execution_order, skills_written_count)
@@ -854,6 +858,7 @@ class PromptTester:
             use_symbolic_state=use_symbolic_state,
             use_unified_planner=use_unified_planner,
             initial_symbolic_state=initial_symbolic_state,
+            inline_ephemeral=inline_ephemeral,
         )
 
         # Default output path if not provided
@@ -1165,10 +1170,403 @@ class PromptTester:
                 "kb_updates_applied": self.db["current"].get("kb_updates_applied", []),
                 "raw_results": results
             }
-            
+
         except Exception as e:
             print(f"Error during trajectory analysis: {e}")
             return {"error": str(e)}
+
+    def plan_kb_skill_with_trained_skills(
+        self,
+        knowledgebase_path,
+        scheduler_state_path,
+        target_skill_name,
+        output_path=None,
+        max_inventory_capacity=99,
+        inline_ephemeral=True,
+        use_symbolic_planner=True,
+    ):
+        """
+        Plan a target skill from the knowledgebase using already-trained skills.
+
+        This simulates what would happen in bottomup_parallel when generating the
+        next skill to train.
+
+        Args:
+            knowledgebase_path: Path to knowledgebase JSON file
+            scheduler_state_path: Path to scheduler_state.json with completed skills
+            target_skill_name: Name of the target skill from the knowledgebase
+            output_path: Optional path to write the generated module
+            max_inventory_capacity: Max inventory capacity for planning
+            inline_ephemeral: Whether to inline ephemeral skills
+            use_symbolic_planner: Whether to use SymbolicSkillDependencyResolver (default True)
+
+        Returns:
+            (execution_order, skill_data) tuple
+
+        Example:
+            tester.plan_kb_skill_with_trained_skills(
+                "resources/craftax_knowledgebase_verified_with_code.json",
+                "exp/craftax_bottomup_reset/scheduler_state.json",
+                "Make Iron Pickaxe"
+            )
+        """
+        # Load knowledgebase
+        with open(knowledgebase_path, 'r') as f:
+            knowledgebase = json.load(f)
+
+        # Load completed skills from scheduler state
+        with open(scheduler_state_path, 'r') as f:
+            scheduler_state = json.load(f)
+
+        # Build completed skills dict
+        completed_skills = {}
+        for skill_id, skill_info in scheduler_state.get("skills", {}).items():
+            if skill_info.get("status") == "completed":
+                skill_name = skill_info.get("skill_name")
+                skill_data = skill_info.get("skill_data")
+                if skill_name and skill_data:
+                    completed_skills[skill_name] = skill_data
+
+        print(f"{'='*70}")
+        print(f"Planning: {target_skill_name}")
+        print(f"{'='*70}")
+        print(f"Completed skills ({len(completed_skills)}): {list(completed_skills.keys())}")
+
+        # Convert knowledgebase to skill dict format
+        kb_skills = {}
+        for skill in knowledgebase.get("skills", []):
+            skill_name = skill.get("skill_name")
+            if not skill_name:
+                continue
+
+            kb_skill_data = {
+                "skill_with_consumption": {
+                    "skill_name": skill_name,
+                    "description": skill.get("description", ""),
+                    "requirements": skill.get("requirements", {}),
+                    "consumption": skill.get("consumption", {}),
+                    "gain": skill.get("gain", {}),
+                    "ephemeral": skill.get("ephemeral", False),
+                }
+            }
+            if "functions" in skill:
+                kb_skill_data["functions"] = skill["functions"]
+            kb_skills[skill_name] = kb_skill_data
+
+        # Combine completed + knowledgebase skills (completed takes precedence)
+        combined_skills = {**kb_skills, **completed_skills}
+
+        print(f"\nCombined skills available: {len(combined_skills)}")
+
+        # Check if target skill exists
+        if target_skill_name not in combined_skills:
+            print(f"ERROR: Target skill '{target_skill_name}' not found")
+            print(f"Available KB skills: {list(kb_skills.keys())}")
+            return None, None
+
+        # Build dependency resolver
+        if use_symbolic_planner:
+            resolver = SymbolicSkillDependencyResolver(combined_skills, max_inventory_capacity=max_inventory_capacity)
+        else:
+            resolver = SkillDependencyResolver(combined_skills, max_inventory_capacity=max_inventory_capacity)
+
+        # Resolve dependencies
+        execution_order = resolver.resolve_dependencies(target_skill_name, inline_ephemeral=inline_ephemeral)
+
+        print(f"\nExecution order for '{target_skill_name}':")
+        for i, (skill_name, count) in enumerate(execution_order):
+            is_trained = "✓" if skill_name in completed_skills else "○"
+            is_target = "★" if skill_name == target_skill_name else " "
+            print(f"  {i+1}. {is_trained}{is_target} {skill_name} (n={count})")
+
+        # Find next skill to train (first not in completed_skills)
+        next_to_train = None
+        for skill_name, count in execution_order:
+            if skill_name not in completed_skills:
+                next_to_train = (skill_name, count)
+                break
+
+        if next_to_train:
+            print(f"\nNext skill to train: {next_to_train[0]} (n={next_to_train[1]})")
+        else:
+            print(f"\nAll skills in execution order are already trained!")
+
+        # Optionally generate module
+        if output_path and next_to_train:
+            print(f"\nGenerating module for '{next_to_train[0]}'...")
+            # Use create_full_module with combined skills
+            self.db["skills"] = combined_skills
+            execution_order_for_next, _ = self.create_full_module(
+                next_to_train[0],
+                n=next_to_train[1],
+                output_path=output_path,
+                use_symbolic_state=use_symbolic_planner,
+                test_frontier=False,
+                max_inventory_capacity=max_inventory_capacity,
+                inline_ephemeral=inline_ephemeral,
+            )
+            return execution_order_for_next, combined_skills.get(next_to_train[0])
+
+        return execution_order, combined_skills.get(target_skill_name)
+
+    def find_and_plan_next_skill(
+        self,
+        knowledgebase_path,
+        scheduler_state_path,
+        ultimate_target_skill,
+        output_path=None,
+        max_inventory_capacity=99,
+        inline_ephemeral=True,
+        use_symbolic_planner=True,
+    ):
+        """
+        Find the next skill to train towards an ultimate target and generate its execution plan.
+
+        This is what bottomup_parallel does: given a target like "Collect Diamond",
+        find the first untrained skill in the execution order and generate its training module.
+
+        Args:
+            knowledgebase_path: Path to knowledgebase JSON file
+            scheduler_state_path: Path to scheduler_state.json with completed skills
+            ultimate_target_skill: Ultimate target skill (e.g., "Collect Diamond")
+            output_path: Optional path to write the generated module
+            max_inventory_capacity: Max inventory capacity for planning
+            inline_ephemeral: Whether to inline ephemeral skills
+            use_symbolic_planner: Whether to use SymbolicSkillDependencyResolver (default True)
+
+        Returns:
+            (next_skill_name, execution_order_for_next_skill, skill_data) tuple
+
+        Example:
+            next_skill, exec_order, data = tester.find_and_plan_next_skill(
+                "resources/craftax_knowledgebase_verified_with_code.json",
+                "exp/craftax_bottomup_reset/scheduler_state.json",
+                "Collect Diamond",
+                output_path="exp/test/next_skill.py"
+            )
+        """
+        # Load knowledgebase
+        with open(knowledgebase_path, 'r') as f:
+            knowledgebase = json.load(f)
+
+        # Load completed skills from scheduler state
+        with open(scheduler_state_path, 'r') as f:
+            scheduler_state = json.load(f)
+
+        # Build completed skills dict
+        completed_skills = {}
+        for _, skill_info in scheduler_state.get("skills", {}).items():
+            if skill_info.get("status") == "completed":
+                skill_name = skill_info.get("skill_name")
+                skill_data = skill_info.get("skill_data")
+                if skill_name and skill_data:
+                    completed_skills[skill_name] = skill_data
+
+        print(f"{'='*70}")
+        print(f"Finding next skill to train towards: {ultimate_target_skill}")
+        print(f"{'='*70}")
+        print(f"Already completed ({len(completed_skills)}): {list(completed_skills.keys())}")
+
+        # Convert knowledgebase to skill dict format
+        kb_skills = {}
+        for skill in knowledgebase.get("skills", []):
+            skill_name = skill.get("skill_name")
+            if not skill_name:
+                continue
+
+            kb_skill_data = {
+                "skill_with_consumption": {
+                    "skill_name": skill_name,
+                    "description": skill.get("description", ""),
+                    "requirements": skill.get("requirements", {}),
+                    "consumption": skill.get("consumption", {}),
+                    "gain": skill.get("gain", {}),
+                    "ephemeral": skill.get("ephemeral", False),
+                }
+            }
+            if "functions" in skill:
+                kb_skill_data["functions"] = skill["functions"]
+            kb_skills[skill_name] = kb_skill_data
+
+        # Combine completed + knowledgebase skills (completed takes precedence)
+        combined_skills = {**kb_skills, **completed_skills}
+
+        # Check if target skill exists
+        if ultimate_target_skill not in combined_skills:
+            print(f"ERROR: Target skill '{ultimate_target_skill}' not found")
+            return None, None, None
+
+        # Build dependency resolver for ultimate target
+        if use_symbolic_planner:
+            resolver = SymbolicSkillDependencyResolver(combined_skills, max_inventory_capacity=max_inventory_capacity)
+        else:
+            resolver = SkillDependencyResolver(combined_skills, max_inventory_capacity=max_inventory_capacity)
+
+        # Get execution order for ultimate target
+        ultimate_execution_order = resolver.resolve_dependencies(ultimate_target_skill, inline_ephemeral=inline_ephemeral)
+
+        print(f"\nExecution order for ultimate target '{ultimate_target_skill}':")
+        for i, (skill_name, count) in enumerate(ultimate_execution_order):
+            is_trained = "✓" if skill_name in completed_skills else "○"
+            print(f"  {i+1}. {is_trained} {skill_name} (n={count})")
+
+        # Find next skill to train
+        next_to_train = None
+        for skill_name, count in ultimate_execution_order:
+            if skill_name not in completed_skills:
+                next_to_train = (skill_name, count)
+                break
+
+        if not next_to_train:
+            print(f"\n✓ All skills towards '{ultimate_target_skill}' are already trained!")
+            return None, ultimate_execution_order, None
+
+        next_skill_name, next_count = next_to_train
+        print(f"\n{'='*70}")
+        print(f"NEXT SKILL TO TRAIN: {next_skill_name} (n={next_count})")
+        print(f"{'='*70}")
+
+        # Now build execution order specifically FOR this next skill
+        # This is what will be used for training - includes its dependencies
+        next_skill_execution_order = resolver.resolve_dependencies(next_skill_name, inline_ephemeral=inline_ephemeral)
+
+        print(f"\nExecution order for '{next_skill_name}':")
+        for i, (skill_name, count) in enumerate(next_skill_execution_order):
+            is_trained = "✓" if skill_name in completed_skills else "○"
+            is_target = "★" if skill_name == next_skill_name else " "
+            print(f"  {i+1}. {is_trained}{is_target} {skill_name} (n={count})")
+
+        # Optionally generate module
+        if output_path:
+            print(f"\nGenerating training module...")
+            self.db["skills"] = combined_skills
+            generated_exec_order, _ = self.create_full_module(
+                next_skill_name,
+                n=next_count,
+                output_path=output_path,
+                use_symbolic_state=use_symbolic_planner,
+                test_frontier=False,
+                max_inventory_capacity=max_inventory_capacity,
+                inline_ephemeral=inline_ephemeral,
+            )
+            print(f"✓ Module written to: {output_path}")
+            return next_skill_name, generated_exec_order, combined_skills.get(next_skill_name)
+
+        return next_skill_name, next_skill_execution_order, combined_skills.get(next_skill_name)
+
+    def test_remapping(self, scheduler_state_path, target_skill_name=None):
+        """
+        Test the expert remapping for a specific skill or all skills.
+
+        Shows what experts would be loaded and how they'd be mapped for training.
+
+        Args:
+            scheduler_state_path: Path to scheduler_state.json
+            target_skill_name: Optional skill name to test (if None, tests all)
+
+        Example:
+            tester.test_remapping("exp/craftax_bottomup_reset/scheduler_state.json", "Make Wooden Pickaxe")
+        """
+        from flowrl.parallel.training_setup import build_remapping
+
+        state_path = Path(scheduler_state_path)
+        with open(state_path, 'r') as f:
+            scheduler_state = json.load(f)
+
+        skills = scheduler_state.get("skills", {})
+
+        # Build completed_skills dict from all skills (not just completed - we want to see what would happen)
+        completed_skills = {}
+        skill_by_name = {}
+        for skill_key, skill_entry in skills.items():
+            skill_name = skill_entry.get("skill_name", skill_key)
+            completed_skills[skill_name] = {
+                "expert_idx": skill_entry.get("expert_idx"),
+            }
+            skill_by_name[skill_name] = skill_entry
+
+        # If target skill specified, only test that one
+        if target_skill_name:
+            if target_skill_name not in skill_by_name:
+                print(f"ERROR: Skill '{target_skill_name}' not found in scheduler state")
+                print(f"Available skills: {list(skill_by_name.keys())}")
+                return False
+            skills_to_test = {target_skill_name: skill_by_name[target_skill_name]}
+        else:
+            skills_to_test = {s.get("skill_name", k): s for k, s in skills.items()}
+
+        print("=" * 70)
+        print("TESTING EXPERT REMAPPING")
+        print("=" * 70)
+
+        all_passed = True
+        for skill_name, skill_entry in skills_to_test.items():
+            expert_idx = skill_entry.get("expert_idx")
+            skill_data = skill_entry.get("skill_data", {})
+            exec_plan = skill_data.get("execution_plan", [])
+            graph_deps = skill_entry.get("dependencies", [])
+
+            # Get skills in execution plan (what will actually be used)
+            plan_skill_names = [
+                step.get("skill_name") for step in exec_plan
+                if step.get("skill_name") and step.get("skill_name") != skill_name
+            ]
+            plan_existing = [s for s in plan_skill_names if s in completed_skills]
+
+            # Get skills that are graph dependencies but NOT in execution plan (ephemeral skills)
+            ephemeral_deps = [d for d in graph_deps if d not in plan_skill_names and d in completed_skills]
+
+            # Build remapping
+            try:
+                g2l, l2g = build_remapping(plan_existing, expert_idx, completed_skills)
+            except Exception as e:
+                print(f"\n✗ {skill_name} (expert {expert_idx})")
+                print(f"  ERROR: {e}")
+                all_passed = False
+                continue
+
+            # Show what would happen
+            print(f"\n{'='*70}")
+            print(f"SKILL: {skill_name} (expert {expert_idx})")
+            print(f"{'='*70}")
+
+            print(f"\nGraph dependencies: {graph_deps}")
+            print(f"Execution plan: {[s.get('skill_name') for s in exec_plan]}")
+
+            if ephemeral_deps:
+                print(f"\n⚠ Ephemeral dependencies (graph deps NOT in execution plan):")
+                for dep in ephemeral_deps:
+                    dep_idx = completed_skills[dep]["expert_idx"]
+                    print(f"  - {dep} (expert {dep_idx}) - NOT included in MoE")
+
+            print(f"\nExperts included in MoE training:")
+            for local_idx in sorted(l2g.keys()):
+                global_idx = l2g[local_idx]
+                # Find skill name for this global index
+                dep_name = skill_name if global_idx == expert_idx else None
+                for sname, sinfo in completed_skills.items():
+                    if sinfo["expert_idx"] == global_idx and sname != skill_name:
+                        dep_name = sname
+                        break
+                print(f"  Local {local_idx} → Global {global_idx} ({dep_name})")
+
+            print(f"\nMapping for generated code:")
+            print(f"  GLOBAL_TO_LOCAL = {g2l}")
+            print(f"  LOCAL_TO_GLOBAL = {l2g}")
+
+            # Validate
+            expected_globals = set([completed_skills[s]["expert_idx"] for s in plan_existing] + [expert_idx])
+            actual_globals = set(g2l.keys())
+
+            if expected_globals != actual_globals:
+                print(f"\n✗ PROBLEM: Mapping includes unexpected experts!")
+                print(f"  Expected: {expected_globals}")
+                print(f"  Got: {actual_globals}")
+                all_passed = False
+            else:
+                print(f"\n✓ Mapping is correct - only includes skills from execution plan")
+
+        return all_passed
 
 
 # Convenience functions for Jupyter notebook usage

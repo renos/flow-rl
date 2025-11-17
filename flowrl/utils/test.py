@@ -506,6 +506,130 @@ def evaluate_hierarchical(
     return normed_result_dict
 
 
+def gen_trajectories_for_analysis(policy_path, max_num_frames=2000, goal_state=None, num_envs=128, num_trajectories=10):
+    """
+    Collect multiple successful trajectories for analysis (NO frame rendering).
+
+    Args:
+        policy_path: Path to trained policy
+        max_num_frames: Max frames per rollout
+        goal_state: Target state to achieve
+        num_envs: Number of parallel environments per batch
+        num_trajectories: Number of successful trajectories to collect
+
+    Returns:
+        List of dicts, each containing:
+            - env_states: Environment states for the trajectory
+            - actions: Actions taken
+    """
+    config_path = f"{policy_path}/config.yaml"
+    with open(config_path, "r") as f:
+        config_ = yaml.load(f, Loader=yaml.FullLoader)
+    config = {
+        k.upper(): v["value"] if type(v) == dict and "value" in v else v
+        for k, v in config_.items()
+    }
+
+    rng = jax.random.PRNGKey(np.random.randint(2**31))
+
+    # Set up batched environment
+    if config["MODULE_PATH"]:
+        module_path = config["MODULE_PATH"]
+        module_name = "reward_and_state"
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module_dict = module.__dict__
+    else:
+        module_dict = None
+
+    env_batch = make_craftax_flow_env_from_name(
+        config["ENV_NAME"], not config["USE_OPTIMISTIC_RESETS"], module_dict
+    )
+    env_batch = AutoResetEnvWrapper(env_batch)
+    env_batch = BatchEnvWrapper(env_batch, num_envs=num_envs)
+
+    env_params = env_batch.default_params
+    task_to_skill_index = jnp.array(env_batch.task_to_skill_index)
+    num_tasks_ = len(task_to_skill_index)
+    heads, num_heads = env_batch.heads_info
+
+    # Load model
+    print(f"Collecting {num_trajectories} successful trajectories (no rendering)...")
+    network, train_state = restore_model(policy_path, env_batch, num_heads)
+
+    def map_player_state_to_skill(player_state):
+        player_state_one_hot = jnp.eye(num_tasks_)[player_state]
+        player_skill = (player_state_one_hot @ task_to_skill_index).astype(jnp.int32)
+        return player_skill
+
+    def batch_step_fn(carry, x):
+        rng, obs, env_state = carry
+        rng, _rng = jax.random.split(rng)
+
+        player_state = env_state.player_state
+        player_skill = map_player_state_to_skill(player_state)
+
+        pi, value = network.apply(train_state["params"], obs, player_skill)
+        action = pi.sample(seed=_rng)
+
+        rng, _rng = jax.random.split(rng)
+        new_obs, new_env_state, reward, done, info = env_batch.step(
+            _rng, env_state, action, env_params
+        )
+
+        return (rng, new_obs, new_env_state), (new_env_state, action)
+
+    @jax.jit
+    def run_batch_rollout(initial_carry, inputs):
+        return jax.lax.scan(batch_step_fn, initial_carry, inputs)
+
+    # Collect successful trajectories
+    successful_trajectories = []
+    max_attempts = 50
+    attempt = 0
+
+    while len(successful_trajectories) < num_trajectories and attempt < max_attempts:
+        attempt += 1
+        print(f"  Batch {attempt}/{max_attempts}: Collected {len(successful_trajectories)}/{num_trajectories} trajectories so far...")
+
+        rng, _rng = jax.random.split(rng)
+        obs, env_state = env_batch.reset(_rng, env_params)
+        initial_carry = (rng, obs, env_state)
+
+        inputs = jnp.arange(max_num_frames)
+        _, (env_states, actions) = run_batch_rollout(initial_carry, inputs)
+
+        # Check which environments achieved the goal
+        max_states_per_env = jnp.max(env_states.player_state, axis=0)
+        successful_envs = jnp.where(max_states_per_env >= goal_state)[0]
+
+        if len(successful_envs) > 0:
+            # Extract all successful environments from this batch
+            for success_env_idx in successful_envs:
+                if len(successful_trajectories) >= num_trajectories:
+                    break
+
+                # Extract this successful trajectory
+                def extract_env(x):
+                    return x[:, success_env_idx] if x.ndim > 1 else x[success_env_idx]
+
+                successful_env_states = jax.tree.map(extract_env, env_states)
+                successful_actions = actions[:, success_env_idx]
+
+                successful_trajectories.append({
+                    'env_states': successful_env_states,
+                    'actions': successful_actions,
+                })
+
+                print(f"    Found successful trajectory {len(successful_trajectories)}/{num_trajectories}")
+
+    if len(successful_trajectories) < num_trajectories:
+        print(f"Warning: Only found {len(successful_trajectories)}/{num_trajectories} successful trajectories after {max_attempts} attempts")
+
+    return successful_trajectories
+
+
 def gen_frames_hierarchical(policy_path, max_num_frames=2000, goal_state=None, num_envs=128):
     """
     Efficient frame generation: First find a successful trajectory in batch, then render it.
@@ -616,11 +740,11 @@ def gen_frames_hierarchical(policy_path, max_num_frames=2000, goal_state=None, n
             print(f"SUCCESS: Environment {success_env_idx} achieved goal state {goal_state}")
             
             # Extract the successful trajectory
-            # Use jax.tree_map to extract the successful environment from the pytree
+            # Use jax.tree.map to extract the successful environment from the pytree
             def extract_env(x):
                 return x[:, success_env_idx] if x.ndim > 1 else x[success_env_idx]
             
-            successful_env_states = jax.tree_map(extract_env, env_states)
+            successful_env_states = jax.tree.map(extract_env, env_states)
             successful_actions = actions[:, success_env_idx]
             
             successful_trajectory = {
@@ -666,7 +790,7 @@ def gen_frames_hierarchical(policy_path, max_num_frames=2000, goal_state=None, n
         def extract_batch(x):
             return x[i:end_idx]
         
-        batch_env_states = jax.tree_map(extract_batch, env_states_trajectory)
+        batch_env_states = jax.tree.map(extract_batch, env_states_trajectory)
         batch_frames = render_batch(batch_env_states)
         # Move batch to CPU to avoid GPU memory accumulation
         batch_frames_cpu = jax.device_get(batch_frames)

@@ -16,6 +16,39 @@ from flowrl.llm.exceptions import ContinueSkillException
 
 
 class Flow:
+    def _load_knowledgebase(self):
+        """
+        Load the knowledgebase once during initialization.
+        This is the ONLY place where knowledgebase should be loaded.
+        """
+        if "knowledge_base" in self.db and self.db["knowledge_base"]:
+            return  # Already loaded
+
+        import os
+        import json
+
+        # Determine knowledgebase path based on environment
+        if "Classic" in self.args.env_name:
+            kb_filename = "craftax_classic_knowledgebase_verified.json"
+        elif "Fabrax" in self.args.env_name:
+            kb_filename = "fabrax_knowledgebase_verified.json"
+        else:  # Full Craftax
+            kb_filename = "craftax_knowledgebase_verified_with_code.json"
+
+        knowledgebase_path = os.path.join(os.path.dirname(__file__), f"../../resources/{kb_filename}")
+
+        try:
+            with open(knowledgebase_path, 'r') as f:
+                knowledgebase = json.load(f)
+            print(f"Loaded knowledgebase from {knowledgebase_path}")
+            # Check if skills have functions
+            skills_with_funcs = sum(1 for s in knowledgebase.get("skills", []) if "functions" in s)
+            print(f"Knowledgebase contains {len(knowledgebase.get('skills', []))} skills, {skills_with_funcs} with pre-existing functions")
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Could not find knowledgebase at {knowledgebase_path}")
+
+        self.db["knowledge_base"] = json.dumps(knowledgebase, indent=2)
+
     def __init__(self, args):
         self.args = args
         self.graph_path = Path(args.graph_path)
@@ -75,6 +108,9 @@ class Flow:
             self.db["frontier_summary"] = self.generate_frontier_summary_from_skills()
         else:
             assert 0, f"Environment '{args.env_name}' not implemented"
+
+        # Load knowledgebase once during initialization
+        self._load_knowledgebase()
 
         self.current_i = args.current_i  # Current iteration (not node count)
         self.previous_i = args.previous_i
@@ -164,6 +200,199 @@ class Flow:
         # Update frontier summary if using frontier-based prompts
         if self.use_frontier_based_prompts:
             self.db["frontier_summary"] = self.generate_frontier_summary_from_skills()
+
+    def select_next_skill_from_knowledgebase(self, target_skill_name):
+        """
+        Select the next skill to train from the knowledgebase based on topological ordering.
+
+        This method:
+        1. Computes the execution ordering for the target skill
+        2. Returns the first skill in that ordering that hasn't been trained or isn't currently training
+        3. Returns the skill data from the knowledgebase with code generation
+
+        Args:
+            target_skill_name: Name of the target skill to train towards
+
+        Returns:
+            (skill_name, skill_data) tuple, or (None, None) if all dependencies are satisfied
+        """
+        # Parse the knowledge base (already loaded in __init__)
+        if isinstance(self.db["knowledge_base"], str):
+            knowledgebase = json.loads(self.db["knowledge_base"])
+        else:
+            knowledgebase = self.db["knowledge_base"]
+
+        # Convert knowledgebase skills list to dictionary format expected by dependency resolver
+        kb_skills = {}
+        for skill in knowledgebase.get("skills", []):
+            skill_name = skill.get("skill_name")
+            if not skill_name:
+                continue
+
+            # Create skill_with_consumption format
+            kb_skill_data = {
+                "skill_with_consumption": {
+                    "skill_name": skill_name,
+                    "description": skill.get("description", ""),
+                    "requirements": skill.get("requirements", {}),
+                    "consumption": skill.get("consumption", {}),
+                    "gain": skill.get("gain", {}),
+                    "ephemeral": skill.get("ephemeral", False),
+                }
+            }
+
+            # Preserve the functions if they exist in the knowledgebase
+            if "functions" in skill:
+                kb_skill_data["functions"] = skill["functions"]
+                kb_skill_data["has_preexisting_functions"] = True
+            else:
+                kb_skill_data["has_preexisting_functions"] = False
+
+            kb_skills[skill_name] = kb_skill_data
+
+        # Temporarily add knowledgebase skills to self.skills for dependency resolution
+        # (we need to include both completed and KB skills for proper resolution)
+        combined_skills = {**self.skills, **kb_skills}
+
+        # Build dependency graph for target skill using combined skills
+        if "Craftax-Symbolic-v1" in self.args.env_name or "Craftax-Pixels-v1" in self.args.env_name:
+            max_capacity = 99
+        elif "Fabrax" in self.args.env_name or "Classic" in self.args.env_name:
+            max_capacity = 9
+        else:
+            max_capacity = 9
+
+        resolver_cls = getattr(self, "dependency_resolver_cls", SkillDependencyResolver)
+        resolver = resolver_cls(combined_skills, max_inventory_capacity=max_capacity)
+        execution_order = resolver.resolve_dependencies(target_skill_name, inline_ephemeral=False)
+
+        print(f"Execution order for target '{target_skill_name}': {execution_order}")
+
+        # Find the first skill in execution order that hasn't been completed or is not currently training
+        for skill_name, count in execution_order:
+            if skill_name not in self.skills and skill_name not in self.training_skills:
+                # This skill needs to be trained
+                print(f"Selected next skill: {skill_name} (count={count})")
+
+                # Get skill data from knowledgebase
+                skill_with_consumption = kb_skills[skill_name]["skill_with_consumption"]
+                kb_skill_entry = kb_skills[skill_name]
+
+                # Set up the database for code generation
+                self.db["current"] = {
+                    "skill_name": skill_name,
+                    "skill_with_consumption": skill_with_consumption,
+                    "num_skills": len(self.skills),
+                }
+
+                # Check if functions already exist in the knowledgebase
+                if "functions" in kb_skill_entry:
+                    print(f"  ✓ Using pre-existing functions from knowledgebase (skipping generation)")
+
+                    # Validate the existing functions
+                    functions_code = kb_skill_entry["functions"]
+
+                    # Remove markdown code fences if present
+                    if functions_code.startswith("```"):
+                        # Remove first line (```python or ```)
+                        lines = functions_code.split('\n')
+                        if lines[0].startswith("```"):
+                            lines = lines[1:]
+                        if lines[-1].strip() == "```":
+                            lines = lines[:-1]
+                        functions_code = '\n'.join(lines)
+
+                    functions, error = self.validate_code(functions_code)
+                    if error != "":
+                        print(f"  ✗ Warning: Pre-existing functions failed validation: {error}")
+                        print(f"  → Falling back to function generation")
+                        return self._generate_code_for_skill(skill_name, skill_with_consumption)
+
+                    # Create skill_data with pre-existing functions
+                    skill_data = {
+                        "skill_name": skill_name,
+                        "skill_with_consumption": skill_with_consumption,
+                        "functions": functions,
+                        "code": functions_code,
+                        "iteration": self.current_i
+                    }
+
+                    # Add to training_skills
+                    self.training_skills[skill_name] = skill_data
+
+                    return skill_name, skill_data
+                else:
+                    # Generate code for this skill
+                    print(f"  ✗ No pre-existing functions found in knowledgebase")
+                    print(f"  → Generating code using LLM graph")
+                    return self._generate_code_for_skill(skill_name, skill_with_consumption)
+
+        # All skills in execution order are already completed or training
+        print(f"All dependencies for '{target_skill_name}' are satisfied or in training")
+        return None, None
+
+    def _generate_code_for_skill(self, skill_name, skill_with_consumption):
+        """
+        Generate code for a skill from the knowledgebase.
+
+        Args:
+            skill_name: Name of the skill
+            skill_with_consumption: Skill data from knowledgebase
+
+        Returns:
+            (skill_name, skill_data) tuple
+        """
+        print(f"  → Generating code using LLM graph for skill: {skill_name}")
+
+        # Prepare database for code generation prompts
+        skills_wo = {}
+        for key, value in self.db.get('skills', {}).items():
+            swc = value.get("skill_with_consumption", {})
+            entry = dict(swc) if isinstance(swc, dict) else {}
+            metrics = value.get("metrics")
+            if metrics:
+                entry["metrics"] = metrics
+            skills_wo[key] = entry
+        self.db['skills_without_code'] = skills_wo
+
+        self.db['training_skills_without_code'] = {
+            key: value.get("skill_with_consumption", {}) for key, value in self.training_skills.items()
+        }
+
+        # Generate code using the graph (only code generation prompts remain)
+        error = "Not generated yet"
+        while error != "":
+            try:
+                evaluated = self.graph.evaluate()
+                generated_code = evaluated[list(evaluated.keys())[-1]]
+                functions, error = self.validate_code(generated_code)
+                if error != "":
+                    print(f"Error generating: {error}")
+            except Exception as e:
+                print(f"Error during code generation: {e}")
+                raise
+
+        # Save the graph evaluation
+        txt_path = os.path.join(self.graph_path / str(self.current_i), "graph_eval.txt")
+        (self.graph_path / str(self.current_i)).mkdir(parents=True, exist_ok=True)
+        with open(txt_path, "w") as f:
+            for key, value in evaluated.items():
+                f.write(f"{key}\n")
+                f.write(f"{value}\n")
+                f.write("-" * 40 + "\n")
+
+        skill_data = {
+            "skill_name": skill_name,
+            "skill_with_consumption": skill_with_consumption,
+            "functions": functions,
+            "code": generated_code,
+            "iteration": self.current_i
+        }
+
+        # Add to training_skills
+        self.training_skills[skill_name] = skill_data
+
+        return skill_name, skill_data
 
     def next_skill(self):
         """Generate and validate a complete skill from the graph"""
@@ -325,7 +554,7 @@ class Flow:
             resolver = resolver_cls(self.skills, **resolver_kwargs)
         else:
             resolver = resolver_cls(self.skills, **resolver_kwargs)
-        self.execution_order = resolver.resolve_dependencies(target_skill_name)
+        self.execution_order = resolver.resolve_dependencies(target_skill_name, inline_ephemeral=True)
         print(f"Execution order for skill '{target_skill_name}' (max_capacity={max_capacity}): {self.execution_order}")
 
     def write_code(self):
@@ -385,6 +614,28 @@ class Flow:
         if self.use_frontier_based_prompts:
             self.db["frontier_summary"] = self.generate_frontier_summary_from_skills()
 
+    def _update_skill_in_knowledge_base(self, skill_name, updated_requirements, updated_consumption, updated_gain):
+        """Update a skill in both self.skills and the knowledge base"""
+        # Parse knowledge base if it's a string
+        if isinstance(self.db.get("knowledge_base"), str):
+            kb = json.loads(self.db["knowledge_base"])
+        else:
+            kb = self.db.get("knowledge_base", {})
+
+        # Find and update the skill in the knowledge base
+        if "skills" in kb:
+            for i, kb_skill in enumerate(kb["skills"]):
+                if kb_skill.get("skill_name") == skill_name:
+                    # Update the skill in the knowledge base
+                    kb["skills"][i]["requirements"] = updated_requirements
+                    kb["skills"][i]["consumption"] = updated_consumption
+                    kb["skills"][i]["gain"] = updated_gain
+                    print(f"Updated skill '{skill_name}' in knowledge base")
+                    break
+
+            # Save the updated knowledge base back
+            self.db["knowledge_base"] = json.dumps(kb, indent=2)
+
     def explain_trajectory(self, env_states, actions, goal_state):
         """Explain the trajectory and update skill based on actual execution"""
         try:
@@ -404,14 +655,15 @@ class Flow:
         # Get current skill name
         skill_name = self.db["current"]["skill_with_consumption"]["skill_name"]
         print(f"Updating skill: {skill_name}")
-        
+
         # Update database with current skills before analysis
         self.db["skills"] = self.skills
-        
-        # Run inventory analysis to update skill and propose KB updates
+
+        # Run inventory analysis to update skill from trajectory
+        # Note: KB updates are now done directly in this method, not via a separate prompt
         results = self.inventory_graph.evaluate()
-        
-        # Update the skill in self.skills based on the analysis
+
+        # Update the skill in both self.skills AND knowledge base based on the analysis
         if "skill_update_results" in self.db["current"]:
             skill_updates = self.db["current"]["skill_update_results"]
             if "updated_gain" in skill_updates:
@@ -429,29 +681,111 @@ class Flow:
                         "Warning: could not normalize updated_gain during trajectory analysis:",
                         exc,
                     )
+
+            updated_requirements = skill_updates.get("updated_requirements", {})
+            updated_consumption = skill_updates.get("updated_consumption", {})
+            updated_gain = skill_updates.get("updated_gain", {})
+
             if skill_name in self.skills:
-                # Update the skill_with_consumption in the stored skill
-                self.skills[skill_name]["skill_with_consumption"]["requirements"] = skill_updates.get("updated_requirements", {})
-                self.skills[skill_name]["skill_with_consumption"]["consumption"] = skill_updates.get("updated_consumption", {})
-                self.skills[skill_name]["skill_with_consumption"]["gain"] = skill_updates.get("updated_gain", {})
+                # Update the skill_with_consumption in self.skills
+                self.skills[skill_name]["skill_with_consumption"]["requirements"] = updated_requirements
+                self.skills[skill_name]["skill_with_consumption"]["consumption"] = updated_consumption
+                self.skills[skill_name]["skill_with_consumption"]["gain"] = updated_gain
                 print(f"Updated skill {skill_name} based on trajectory")
-                print(f"New requirements: {skill_updates.get('updated_requirements', {})}")
-                print(f"New consumption: {skill_updates.get('updated_consumption', {})}")
-                print(f"New gain: {skill_updates.get('updated_gain', {})}")
-                
-        # Print knowledge base updates applied
-        if "kb_updates_applied" in self.db["current"]:
-            kb_updates = self.db["current"]["kb_updates_applied"]
-            print("\nKnowledge base updates applied:")
-            for i, update in enumerate(kb_updates):
-                print(f"  Update {i+1}: {' -> '.join(update.get('path', []))}")
-                print(f"    Old: {update.get('old_requirements', [])}")
-                print(f"    New: {update.get('new_requirements', [])}")
-                print(f"    Reason: {update.get('reason', '')}")
-        
+                print(f"New requirements: {updated_requirements}")
+                print(f"New consumption: {updated_consumption}")
+                print(f"New gain: {updated_gain}")
+
+                # Also update in the knowledge base
+                self._update_skill_in_knowledge_base(skill_name, updated_requirements, updated_consumption, updated_gain)
+
         #Update database skills
         self.db["skills"] = self.skills
-        
+
+        return results
+
+    def explain_trajectories(self, trajectories, goal_state):
+        """
+        Explain multiple trajectories and update skill based on actual executions.
+
+        Args:
+            trajectories: List of dicts, each containing 'env_states' and 'actions'
+            goal_state: Target state for the skill
+        """
+        # Determine game type based on environment name
+        if self.args.env_name == "Craftax-Classic-Symbolic-v1":
+            game = "craftax_classic"
+        elif "Fabrax" in self.args.env_name:
+            game = "fabrax"
+        else:
+            game = "craftax"
+
+        # Explain each trajectory individually
+        all_trajectory_explanations = []
+        for i, traj in enumerate(trajectories):
+            print(f"  Explaining trajectory {i+1}/{len(trajectories)}...")
+            try:
+                trajectory_explanation = explain_trajectory(
+                    traj['env_states'], traj['actions'], start_state=goal_state, game=game
+                )
+                all_trajectory_explanations.append(trajectory_explanation)
+            except Exception as e:
+                print(f"  Warning: Failed to explain trajectory {i+1}: {e}")
+                continue
+
+        # Store all trajectories in db for the prompt
+        self.db["example_trajectories"] = all_trajectory_explanations
+        print(f"Collected {len(all_trajectory_explanations)} trajectory explanations")
+
+        # Get current skill name
+        skill_name = self.db["current"]["skill_with_consumption"]["skill_name"]
+        print(f"Updating skill: {skill_name}")
+
+        # Update database with current skills before analysis
+        self.db["skills"] = self.skills
+
+        # Run inventory analysis to update skill from trajectories
+        results = self.inventory_graph.evaluate()
+
+        # Update the skill in both self.skills AND knowledge base based on the analysis
+        if "skill_update_results" in self.db["current"]:
+            skill_updates = self.db["current"]["skill_update_results"]
+            if "updated_gain" in skill_updates:
+                try:
+                    from flowrl.llm.craftax.after_queries import normalize_gain_schema
+
+                    normalized_gain = normalize_gain_schema(
+                        skill_updates.get("updated_gain", {}),
+                        ValueError,
+                        context="trajectory_analysis.updated_gain",
+                    )
+                    skill_updates["updated_gain"] = normalized_gain
+                except Exception as exc:
+                    print(
+                        "Warning: could not normalize updated_gain during trajectory analysis:",
+                        exc,
+                    )
+
+            updated_requirements = skill_updates.get("updated_requirements", {})
+            updated_consumption = skill_updates.get("updated_consumption", {})
+            updated_gain = skill_updates.get("updated_gain", {})
+
+            if skill_name in self.skills:
+                # Update the skill_with_consumption in self.skills
+                self.skills[skill_name]["skill_with_consumption"]["requirements"] = updated_requirements
+                self.skills[skill_name]["skill_with_consumption"]["consumption"] = updated_consumption
+                self.skills[skill_name]["skill_with_consumption"]["gain"] = updated_gain
+                print(f"Updated skill {skill_name} based on {len(all_trajectory_explanations)} trajectories")
+                print(f"New requirements: {updated_requirements}")
+                print(f"New consumption: {updated_consumption}")
+                print(f"New gain: {updated_gain}")
+
+                # Also update in the knowledge base
+                self._update_skill_in_knowledge_base(skill_name, updated_requirements, updated_consumption, updated_gain)
+
+        # Update database skills
+        self.db["skills"] = self.skills
+
         return results
 
     def create_checkpoint(self, checkpoint_name):

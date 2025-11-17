@@ -178,7 +178,7 @@ def make_train(config, prev_model_state=None, return_test_network=False):
             init_states = jnp.zeros((1,), dtype=jnp.int32)
             network_params = network.init(_rng, init_x, init_states)
             network_params = jax.pure_callback(
-                param_updater, network_params, network_params
+                param_updater, network_params, network_params, vmap_method='sequential'
             )
             if config["ANNEAL_LR"]:
                 tx = optax.chain(

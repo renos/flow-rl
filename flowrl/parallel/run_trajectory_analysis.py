@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from flowrl.llm.flow import Flow
 from flowrl.parallel.training_processor import load_global_checkpoint
-from flowrl.utils.test import gen_frames_hierarchical
+from flowrl.utils.test import gen_trajectories_for_analysis
 
 
 def main():
@@ -27,6 +27,7 @@ def main():
     parser.add_argument("--base_dir", type=str, required=True)
     parser.add_argument("--frame_gen_envs", type=int, default=32)
     parser.add_argument("--frame_gen_max_frames", type=int, default=1000)
+    parser.add_argument("--num_trajectories", type=int, default=10, help="Number of successful trajectories to collect")
     args = parser.parse_args()
 
     # Load skill data
@@ -77,26 +78,89 @@ def main():
     # (after all execution_plan steps complete)
     actual_goal_state = goal_state + 1
 
-    print(f"Generating frames for trajectory analysis...")
+    print(f"Collecting trajectories for analysis...")
     print(f"  Policies: {policies_path}")
     print(f"  Execution plan length: {len(exec_plan)}")
     print(f"  Target goal state: {actual_goal_state}")
     print(f"  Num envs: {args.frame_gen_envs}")
     print(f"  Max frames: {args.frame_gen_max_frames}")
+    print(f"  Num trajectories: {args.num_trajectories}")
 
-    frames, states, env_states, actions = gen_frames_hierarchical(
+    trajectories = gen_trajectories_for_analysis(
         policy_path=policies_path,
         max_num_frames=args.frame_gen_max_frames,
         goal_state=actual_goal_state,
         num_envs=args.frame_gen_envs,
+        num_trajectories=args.num_trajectories,
     )
 
     # Prepare Flow context
     flow_graph.db["current"] = flow_graph.db.get("current", {})
     flow_graph.db["current"]["skill_with_consumption"] = skill_data.get("skill_with_consumption", {})
 
-    print(f"Running trajectory explanation...")
-    flow_graph.explain_trajectory(env_states, actions, goal_state)
+    print(f"Running trajectory explanation on {len(trajectories)} successful trajectories...")
+    flow_graph.explain_trajectories(trajectories, goal_state)
+
+    # Save trajectory debugging data to readable text file
+    trajectory_debug_path = Path(args.output_path).parent / "trajectory_debug.txt"
+    example_trajectories = flow_graph.db.get("example_trajectories", [])
+    with open(trajectory_debug_path, "w") as f:
+        f.write("=" * 80 + "\n")
+        f.write("TRAJECTORY ANALYSIS DEBUG DATA\n")
+        f.write("=" * 80 + "\n\n")
+
+        f.write(f"Skill Name: {skill_data.get('skill_with_consumption', {}).get('skill_name', 'Unknown')}\n")
+        f.write(f"Goal State: {goal_state}\n")
+        f.write(f"Execution Plan Length: {len(exec_plan)}\n")
+        f.write(f"Number of Environments: {args.frame_gen_envs}\n")
+        f.write(f"Max Frames: {args.frame_gen_max_frames}\n")
+        f.write(f"Number of Trajectories Collected: {len(trajectories)}\n\n")
+
+        f.write("-" * 80 + "\n")
+        f.write("EXECUTION PLAN:\n")
+        f.write("-" * 80 + "\n")
+        for i, step in enumerate(exec_plan):
+            f.write(f"{i}: {step}\n")
+        f.write("\n")
+
+        # Write all trajectories
+        for traj_idx, example_trajectory in enumerate(example_trajectories):
+            f.write("=" * 80 + "\n")
+            f.write(f"TRAJECTORY #{traj_idx + 1} (Analyzed):\n")
+            f.write("=" * 80 + "\n")
+            if example_trajectory:
+                for item in example_trajectory:
+                    f.write(f"{item}\n")
+            else:
+                f.write("No trajectory data (empty list)\n")
+            f.write("\n")
+
+        # Write shapes for first trajectory only
+        if len(trajectories) > 0:
+            first_traj = trajectories[0]
+            f.write("-" * 80 + "\n")
+            f.write("ENV STATES SHAPE & INFO (First Trajectory):\n")
+            f.write("-" * 80 + "\n")
+            env_states = first_traj['env_states']
+            f.write(f"Type: {type(env_states)}\n")
+            if hasattr(env_states, 'shape'):
+                f.write(f"Shape: {env_states.shape}\n")
+            if hasattr(env_states, 'dtype'):
+                f.write(f"Dtype: {env_states.dtype}\n")
+            f.write("\n")
+
+            f.write("-" * 80 + "\n")
+            f.write("ACTIONS SHAPE & INFO (First Trajectory):\n")
+            f.write("-" * 80 + "\n")
+            actions = first_traj['actions']
+            f.write(f"Type: {type(actions)}\n")
+            if hasattr(actions, 'shape'):
+                f.write(f"Shape: {actions.shape}\n")
+            if hasattr(actions, 'dtype'):
+                f.write(f"Dtype: {actions.dtype}\n")
+            f.write("\n")
+
+    print(f"Trajectory debug data saved to: {trajectory_debug_path}")
 
     # Apply updates to skill data
     skill_updates = flow_graph.db.get("current", {}).get("skill_update_results", {})

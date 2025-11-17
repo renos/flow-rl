@@ -164,7 +164,7 @@ def make_train_fast(
         )
 
     def compute_metrics_host(traj_batch):
-        traj_np = jax.tree_map(lambda x: np.array(x), traj_batch)
+        traj_np = jax.tree.map(lambda x: np.array(x), traj_batch)
         info = traj_np.info if hasattr(traj_np, "info") else {}
         returned_episode = info.get("returned_episode")
         if returned_episode is None:
@@ -386,7 +386,7 @@ def make_train_fast(
             def _reshape(x):
                 return x.reshape((batch_size,) + x.shape[2:])
 
-            flat_batch = jax.tree_map(_reshape, batch)
+            flat_batch = jax.tree.map(_reshape, batch)
             loss_init = jnp.zeros(4, dtype=jnp.float32)
 
             def _update_minibatch(carry, minibatch):
@@ -440,10 +440,10 @@ def make_train_fast(
                 train_state, rng, loss_acc = carry
                 rng, perm_rng = jax.random.split(rng)
                 permutation = jax.random.permutation(perm_rng, batch_size)
-                shuffled = jax.tree_map(
+                shuffled = jax.tree.map(
                     lambda x: jnp.take(x, permutation, axis=0), flat_batch
                 )
-                minibatches = jax.tree_map(
+                minibatches = jax.tree.map(
                     lambda x: jnp.reshape(
                         x,
                         (

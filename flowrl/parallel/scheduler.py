@@ -49,6 +49,14 @@ class SkillScheduler:
         frame_gen_envs: int = 32,
         frame_gen_max_frames: int = 1000,
         env_name: str = "Craftax-Symbolic-v1",
+        ppo_flow_variant: str = "ppo_flow",
+        latest_reset_prob: float = 0.0,
+        progressive_reset_curriculum: bool = False,
+        progressive_reset_threshold: float = 0.2,
+        per_skill_balance: bool = True,
+        per_skill_balance_threshold: int = 64,
+        per_skill_balance_cap: float = 4.0,
+        success_rate_ema_alpha: float = 0.15,
     ):
         """
         Initialize scheduler.
@@ -84,6 +92,16 @@ class SkillScheduler:
         self.frame_gen_envs = int(frame_gen_envs)
         self.frame_gen_max_frames = int(frame_gen_max_frames)
         self.env_name = env_name
+
+        # PPO Flow variant and specific parameters
+        self.ppo_flow_variant = ppo_flow_variant
+        self.latest_reset_prob = latest_reset_prob
+        self.progressive_reset_curriculum = progressive_reset_curriculum
+        self.progressive_reset_threshold = progressive_reset_threshold
+        self.per_skill_balance = per_skill_balance
+        self.per_skill_balance_threshold = per_skill_balance_threshold
+        self.per_skill_balance_cap = per_skill_balance_cap
+        self.success_rate_ema_alpha = success_rate_ema_alpha
 
         # Expert index tracking
         self.next_expert_idx = 0
@@ -170,7 +188,7 @@ class SkillScheduler:
         Returns:
             skill_id for tracking
         """
-        skill_id = skill_name.replace(' ', '_').replace('/', '_')
+        skill_id = skill_name.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '')
 
         self.state["skills"][skill_id] = {
             "skill_name": skill_name,
@@ -383,7 +401,8 @@ class SkillScheduler:
                             skill["processing_results"] = results
 
                         # Mark this skill as completed for dependency checks
-                        safe_name = skill["skill_name"].replace(' ', '_').replace('/', '_')
+                        from flowrl.parallel.training_processor import sanitize_skill_name
+                        safe_name = sanitize_skill_name(skill["skill_name"])
                         completed_skills[skill["skill_name"]] = {
                             "expert_idx": skill["expert_idx"],
                             "path": f"skills/{skill['expert_idx']}_{safe_name}/",
@@ -557,7 +576,8 @@ class SkillScheduler:
             skill["run_folder"] = str(run_folder)
 
         # Ensure per-skill folder exists for logs and final artifacts
-        safe_name = skill["skill_name"].replace(' ', '_').replace('/', '_')
+        # Remove special characters that cause issues with tmux session names
+        safe_name = skill["skill_name"].replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '')
         skill_folder = self.base_dir / "skills" / f"{expert_idx}_{safe_name}"
         skill_folder.mkdir(parents=True, exist_ok=True)
         skill["skill_folder"] = str(skill_folder)
@@ -602,7 +622,7 @@ class SkillScheduler:
             else:  # final phase
                 # Use explicit continuation allocation if present, else remaining budget
                 total_timesteps = int(skill.pop("_continuation_timesteps", max(0, skill.get("budget_remaining", 0))))
-                success_state_rate = 1.0
+                success_state_rate = 0.3
                 prev_module_path = skill.get("prev_module_path")
 
             # Calculate initial_frames for continuation training
@@ -695,6 +715,7 @@ class SkillScheduler:
 
         parts = [
             "env",
+            #"-u", "LD_LIBRARY_PATH",
             f"CUDA_VISIBLE_DEVICES={gpu_id}",
             python_exe,
             str(analysis_script),
@@ -708,7 +729,7 @@ class SkillScheduler:
             "--frame_gen_max_frames", str(self.frame_gen_max_frames),
         ]
 
-        return " ".join(parts)
+        return "unset LD_LIBRARY_PATH && " + " ".join(parts)
 
     def _build_training_command(self, module_path: Path, run_folder: Path, gpu_id: str, log_path: Path, success_state: int, total_timesteps: Optional[int] = None, success_state_rate: float = 1.0, prev_module_path: Optional[str] = None, initial_frames: int = 0) -> str:
         """Build PPO training command without shell features.
@@ -719,9 +740,10 @@ class SkillScheduler:
         python_exe = sys.executable
         parts = [
             "env",
+            #"-u", "LD_LIBRARY_PATH",
             f"CUDA_VISIBLE_DEVICES={gpu_id}",
             python_exe,
-            "-m", "flowrl.ppo_flow",
+            "-m", f"flowrl.{self.ppo_flow_variant}",
             "--module_path", str(module_path),
             "--env_name", self.env_name,
             "--success_state", str(success_state),
@@ -739,7 +761,20 @@ class SkillScheduler:
         # Add initial_frames for continuation training
         if initial_frames > 0:
             parts += ["--initial_frames", str(int(initial_frames))]
-        return " ".join(parts)
+
+        # Add ppo_flow_w_reset specific parameters
+        if self.ppo_flow_variant == "ppo_flow_w_reset":
+            parts += ["--latest_reset_prob", str(self.latest_reset_prob)]
+            if self.progressive_reset_curriculum:
+                parts += ["--progressive_reset_curriculum"]
+            parts += ["--progressive_reset_threshold", str(self.progressive_reset_threshold)]
+            if self.per_skill_balance:
+                parts += ["--per_skill_balance"]
+            parts += ["--per_skill_balance_threshold", str(self.per_skill_balance_threshold)]
+            parts += ["--per_skill_balance_cap", str(self.per_skill_balance_cap)]
+            parts += ["--success_rate_ema_alpha", str(self.success_rate_ema_alpha)]
+
+        return "unset LD_LIBRARY_PATH && " + " ".join(parts)
 
     def _launch_tmux_session(self, session_name: str, cmd: str, working_dir: Path, log_path: Path):
         """Launch a tmux session with a clean command and attach logging via pipe-pane."""
@@ -750,17 +785,23 @@ class SkillScheduler:
             stdout=subprocess.DEVNULL
         )
 
-        # Create new session (detached)
+        # Create new session (detached) with a shell (don't run command yet)
         subprocess.run([
             "tmux", "new-session", "-d", "-s", session_name,
-            "-c", str(working_dir),
-            cmd
+            "-c", str(working_dir)
         ], check=True)
 
-        # Pipe pane output to the log file (append once)
+        # Set up pipe-pane logging BEFORE running the command
         subprocess.run([
             "tmux", "pipe-pane", "-o", "-t", session_name,
             f"cat >> {log_path} 2>&1"
+        ], check=True)
+
+        # Now send the actual command to the session, followed by exit
+        # The "; exit" ensures the session closes when the command finishes
+        subprocess.run([
+            "tmux", "send-keys", "-t", session_name,
+            f"{cmd}; exit", "Enter"
         ], check=True)
 
     def _is_session_alive(self, session_name: str) -> bool:
@@ -880,7 +921,7 @@ class SkillScheduler:
 
     def get_skill_info(self, skill_name: str) -> Optional[Dict]:
         """Get information about a specific skill."""
-        skill_id = skill_name.replace(' ', '_').replace('/', '_')
+        skill_id = skill_name.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '')
         return self.state["skills"].get(skill_id)
 
     def enqueue_continuation(self, skill_name: str, extra_timesteps: int):
@@ -893,7 +934,7 @@ class SkillScheduler:
             skill_name: Human-readable skill name
             extra_timesteps: Additional timesteps to train
         """
-        skill_id = skill_name.replace(' ', '_').replace('/', '_')
+        skill_id = skill_name.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '')
         if skill_id not in self.state["skills"]:
             raise ValueError(f"Unknown skill '{skill_name}' for continuation")
         skill = self.state["skills"][skill_id]

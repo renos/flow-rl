@@ -56,10 +56,10 @@ def verify_function(functions):
     task_reward_sucessful = False
     task_reward_exception = ""
     batch_size = 2
-    batched_inventory = jax.tree_map(
+    batched_inventory = jax.tree.map(
         lambda x: jnp.repeat(jnp.array([x]), batch_size, axis=0), inventory
     )
-    batched_inventory_diff = jax.tree_map(
+    batched_inventory_diff = jax.tree.map(
         lambda x: jnp.repeat(jnp.array([x]), batch_size, axis=0), inventory_diff
     )
     batched_closest_blocks = jnp.repeat(closest_blocks[None], batch_size, axis=0)

@@ -575,7 +575,7 @@ def make_train(config, prev_model_state=None, return_test_network=False):
                     improved = new_ps > prev_best
 
                 latest_obs = apply_mask(improved, obsv, ex_state["latest_obs"])
-                latest_inner = jax.tree_map(
+                latest_inner = jax.tree.map(
                     lambda n, o: apply_mask(improved, n, o),
                     env_state.env_state,
                     ex_state["latest_inner_state"],
@@ -652,7 +652,7 @@ def make_train(config, prev_model_state=None, return_test_network=False):
                 memories_mask_transition = memories_mask.squeeze()
 
                 # Apply chosen next state/obs and restore TransformerXL memories
-                env_inner_selected = jax.tree_map(
+                env_inner_selected = jax.tree.map(
                     lambda latest, cur: apply_mask(use_latest, latest, cur),
                     ex_state["latest_inner_state"],
                     env_state.env_state,
@@ -689,7 +689,7 @@ def make_train(config, prev_model_state=None, return_test_network=False):
                         "latest_obs": apply_mask(
                             keep_reset, obsv, ex_state["latest_obs"]
                         ),
-                        "latest_inner_state": jax.tree_map(
+                        "latest_inner_state": jax.tree.map(
                             lambda new, old: apply_mask(keep_reset, new, old),
                             env_state.env_state,
                             ex_state["latest_inner_state"],

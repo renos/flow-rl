@@ -3016,7 +3016,7 @@ def update_diffs(
     state, init_intrinsics, updated_intrinsics, init_inventory, updated_inventory, init_achievements, updated_achievements
 ):
     intrinsics_diff = jnp.array(updated_intrinsics - init_intrinsics, dtype=jnp.int32)
-    inventory_diff = jax.tree_map(
+    inventory_diff = jax.tree.map(
     lambda x, y: jnp.array(x - y, dtype=jnp.int32),
     updated_inventory,
     init_inventory

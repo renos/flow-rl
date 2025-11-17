@@ -118,7 +118,7 @@ def generate_videos_ppo_rnn(policy_path: str,
                 env_idx = np.random.randint(0, num_envs)
                 print(f"Using environment {env_idx} for video frames")
 
-            env_state_i = jax.tree_map(lambda x: x[env_idx], env_state)
+            env_state_i = jax.tree.map(lambda x: x[env_idx], env_state)
             frame = renderer(env_state_i, block_px)
             # Force JAX to complete computation before numpy conversion
             frame = jax.device_get(frame)

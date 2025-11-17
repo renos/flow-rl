@@ -101,7 +101,7 @@ def apply_mask(mask: jnp.ndarray, new: jnp.ndarray, old: jnp.ndarray) -> jnp.nda
 
 
 def mask_tree(mask: jnp.ndarray, new_tree: Any, old_tree: Any) -> Any:
-    return jax.tree_map(lambda new, old: apply_mask(mask, new, old), new_tree, old_tree)
+    return jax.tree.map(lambda new, old: apply_mask(mask, new, old), new_tree, old_tree)
 
 
 def make_train(config):
@@ -352,9 +352,9 @@ def make_train(config):
                 batch_size = config["NUM_STEPS"] * config["NUM_ENVS"]
                 permutation = jax.random.permutation(perm_rng, batch_size)
                 batch = (traj_batch, advantages, targets)
-                batch = jax.tree_map(lambda x: x.reshape((batch_size,) + x.shape[2:]), batch)
-                shuffled = jax.tree_map(lambda x: jnp.take(x, permutation, axis=0), batch)
-                minibatches = jax.tree_map(
+                batch = jax.tree.map(lambda x: x.reshape((batch_size,) + x.shape[2:]), batch)
+                shuffled = jax.tree.map(lambda x: jnp.take(x, permutation, axis=0), batch)
+                minibatches = jax.tree.map(
                     lambda x: x.reshape((config["NUM_MINIBATCHES"], -1) + x.shape[1:]),
                     shuffled,
                 )

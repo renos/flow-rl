@@ -93,20 +93,10 @@ def generate_graph(db=None, return_inventory_graph=False, llm_name=None):
         return graph
 
     if db is None:
-        # Load the knowledgebase
-        import json
-        import os
-        knowledgebase_path = os.path.join(os.path.dirname(__file__), "../../../resources/craftax_classic_knowledgebase_verified.json")
-        try:
-            with open(knowledgebase_path, 'r') as f:
-                knowledgebase = json.load(f)
-        except FileNotFoundError:
-            print(f"Warning: Could not find knowledgebase at {knowledgebase_path}")
-            knowledgebase = {}
-        
+        # Create minimal database for code generation graph
+        # Note: knowledgebase is loaded separately in Flow.select_next_skill_from_knowledgebase()
         db = {
             "manual": MANUAL,
-            "knowledge_base": json.dumps(knowledgebase, indent=2),
         }
 
     # prompts, temp_prompts = return_dense_prompts(LLM_API_FUNCTION_GPT4)

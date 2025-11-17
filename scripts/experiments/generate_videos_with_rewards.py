@@ -135,7 +135,7 @@ def gen_frames_ppo_with_rewards(policy_path, max_num_frames=2000, num_envs=128, 
     def extract_env(x):
         return x[:, env_idx] if x.ndim > 1 else x[env_idx]
 
-    selected_env_states = jax.tree_map(extract_env, env_states)
+    selected_env_states = jax.tree.map(extract_env, env_states)
     selected_actions = actions[:, env_idx]
     selected_rewards = rewards[:, env_idx]
 
@@ -197,7 +197,7 @@ def gen_frames_ppo_with_rewards(policy_path, max_num_frames=2000, num_envs=128, 
     frames_list = []
     for i in range(num_frames):
         # Extract single frame data
-        env_state_i = jax.tree_map(lambda x: x[i], selected_env_states)
+        env_state_i = jax.tree.map(lambda x: x[i], selected_env_states)
         reward_i = selected_rewards[i]
 
         # Render frame with reward info
@@ -288,7 +288,7 @@ def gen_frames_ppo_rnn_with_rewards(policy_path, max_num_frames=2000, num_envs=1
     def extract_env(x):
         return x[:, env_idx] if x.ndim > 1 else x[env_idx]
 
-    selected_env_states = jax.tree_map(extract_env, env_states_hist)
+    selected_env_states = jax.tree.map(extract_env, env_states_hist)
     selected_actions = actions[:, env_idx]
     selected_rewards = rewards[:, env_idx]
 
@@ -309,7 +309,7 @@ def gen_frames_ppo_rnn_with_rewards(policy_path, max_num_frames=2000, num_envs=1
     # Render frames with reward text similar to non-RNN variant
     frames_list = []
     for i in range(len(selected_rewards)):
-        env_state_i = jax.tree_map(lambda x: x[i], selected_env_states)
+        env_state_i = jax.tree.map(lambda x: x[i], selected_env_states)
         reward_i = selected_rewards[i]
         frame = renderer(env_state_i, block_pixel_size)
         frame_with_text = np.array(frame, dtype=np.uint8)
@@ -458,7 +458,7 @@ def gen_frames_hierarchical_with_rewards(policy_path, max_num_frames=2000, goal_
             rng, obs, env_state, reward, action = step_once(rng, obs, env_state)
 
             # Slice the chosen env from the batch
-            env_state_i = jax.tree_map(lambda x: x[render_env_idx], env_state)
+            env_state_i = jax.tree.map(lambda x: x[render_env_idx], env_state)
             reward_i = float(reward[render_env_idx])
             state_i = int(env_state.player_state[render_env_idx])
             action_i = int(action[render_env_idx]) if hasattr(action, 'shape') else int(action)
@@ -513,7 +513,7 @@ def gen_frames_hierarchical_with_rewards(policy_path, max_num_frames=2000, goal_
             def extract_env(x):
                 return x[:, success_env_idx] if x.ndim > 1 else x[success_env_idx]
             
-            successful_env_states = jax.tree_map(extract_env, env_states)
+            successful_env_states = jax.tree.map(extract_env, env_states)
             successful_actions = actions[:, success_env_idx]
             successful_rewards = rewards[:, success_env_idx]  # Extract rewards too
             
@@ -601,7 +601,7 @@ def gen_frames_hierarchical_with_rewards(policy_path, max_num_frames=2000, goal_
     frames_list = []
     for i in range(num_frames):
         # Extract single frame data
-        env_state_i = jax.tree_map(lambda x: x[i], env_states_trajectory)
+        env_state_i = jax.tree.map(lambda x: x[i], env_states_trajectory)
         reward_i = rewards_trajectory[i]
         state_i = env_states_trajectory.player_state[i]
         

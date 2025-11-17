@@ -60,63 +60,6 @@ Update the skill's requirements and gain as lambda functions based on what the t
         "after_query": SkillUpdateAfterQuery(),
     }
     
-    inventory_prompts["propose_knowledge_base_updates"] = {
-        "prompt": """
-You need to propose which parts of the knowledge base should be updated based on trajectory analysis.
-
-Knowledge Base:
-```
-$db.knowledge_base$
-```
-
-Trajectory Data:
-```
-$db.example_trajectory$
-```
-
-Current Skill:
-```
-$db.current.skill_with_consumption$
-```
-
-## Task
-
-Look at the knowledge base structure and propose which specific entries/fields should be updated based on what was VERIFIED from the trajectory execution.
-
-The knowledge base contains requirement lists with items marked as "ASSUMPTION" or "VERIFIED". Based on the trajectory, propose updates where:
-
-1. ASSUMPTIONS that were confirmed by the trajectory become "VERIFIED: condition"
-2. ASSUMPTIONS that were proven FALSE by the trajectory should be REMOVED
-3. ASSUMPTIONS that cannot be verified from this trajectory MUST remain "ASSUMPTION: condition" 
-4. New requirements discovered from the trajectory are added as "VERIFIED: condition"
-
-**CRITICAL**: Only make changes when you have clear evidence from the trajectory:
-- Change ASSUMPTION to VERIFIED if trajectory confirms it's true
-- REMOVE assumptions if trajectory proves they're false
-- KEEP assumptions unchanged if trajectory provides no evidence either way
-
-Requirements should be in the format: "VERIFIED: condition" or "ASSUMPTION: condition"
-
-# Formatting
-```json
-{
-"proposed_updates": [
-    {
-        "path": ["key1", "subkey", "field"], # Path to the field in the knowledge base
-        "updated_requirements": [], # Complete updated list of requirements (verified + remaining assumptions)
-        "reason_for_update": "" # What the trajectory showed that confirms, disproves, or leaves unchanged
-    }
-]
-}
-```
-
-        """,
-        "dep": ["update_skill_from_trajectory"],
-        "compose": ComposeReasoningPrompt(),
-        "query": LLM_API_FUNCTION_GPT4,
-        "after_query": KnowledgeBaseUpdateAfterQuery(),
-    }
-
     for _, v in inventory_prompts.items():
         v["prompt"] = v["prompt"].strip()
     return inventory_prompts

@@ -571,8 +571,14 @@ class SkillUpdateAfterQuery(aq.JsonAfterQuery):
 
 
 class KnowledgeBaseUpdateAfterQuery(aq.JsonAfterQuery):
-    """Handles results from propose_knowledge_base_updates prompt"""
-    
+    """
+    DEPRECATED: Handles results from propose_knowledge_base_updates prompt.
+
+    This class is no longer used. Knowledge base updates are now performed directly
+    in Flow._update_skill_in_knowledge_base() during trajectory analysis, rather than
+    via a separate LLM prompt. Kept for backwards compatibility only.
+    """
+
     def __init__(self):
         super().__init__()
         self.type = dict

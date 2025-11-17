@@ -183,7 +183,8 @@ Example:
     base_dir = Path(base_dir)
 
     # 1. Build remapping
-    # Include all skills referenced in execution_plan that already exist, not just direct deps
+    # Only include skills that are actually referenced in the execution plan
+    # (not abstract graph dependencies that aren't used in training)
     exec_plan = skill_data.get("execution_plan", []) or []
     plan_skill_names = [
         step.get("skill_name") for step in exec_plan
@@ -191,8 +192,8 @@ Example:
     ]
     # Only include ones we know about in completed_skills
     plan_existing = [s for s in plan_skill_names if s in completed_skills]
-    # Union with direct deps, preserve order by using dict.fromkeys
-    required_skill_names = list(dict.fromkeys(list(dependency_skill_names) + plan_existing))
+    # Use only skills that appear in the execution plan - these are the actual MoE experts needed
+    required_skill_names = list(dict.fromkeys(plan_existing))
 
     global_to_local, local_to_global = build_remapping(
         required_skill_names,
@@ -201,7 +202,8 @@ Example:
     )
 
     # 2. Create training_runs folder structure
-    safe_skill_name = skill_name.replace(' ', '_').replace('/', '_')
+    # Remove special characters that cause issues with shell commands
+    safe_skill_name = skill_name.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '')
     run_folder = base_dir / "training_runs" / f"skill_{global_expert_idx}_{safe_skill_name}"
     run_folder.mkdir(parents=True, exist_ok=True)
 
@@ -218,7 +220,7 @@ Example:
     for local_idx, global_idx in local_global_pairs:
         if global_idx == global_expert_idx:
             # Check if this expert already exists (continuation training)
-            safe_skill = skill_name.replace(' ', '_').replace('/', '_')
+            safe_skill = skill_name.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '')
             existing_expert_path = base_dir / "skills" / f"{global_idx}_{safe_skill}" / f"expert_{global_idx}_policy"
 
             if existing_expert_path.exists():
@@ -256,7 +258,8 @@ Example:
                 skill_folder = base_dir / completed_skills[owning_skill]["path"]
             else:
                 # Construct path from skill name and expert index
-                safe_dep_name = owning_skill.replace(' ', '_').replace('/', '_')
+                from flowrl.parallel.training_processor import sanitize_skill_name
+                safe_dep_name = sanitize_skill_name(owning_skill)
                 skill_folder = base_dir / "skills" / f"{global_idx}_{safe_dep_name}"
 
             expert_path = skill_folder / f"expert_{global_idx}_policy"

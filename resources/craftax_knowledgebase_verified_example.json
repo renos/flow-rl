@@ -1,0 +1,1680 @@
+{
+  "tutorial_context": {
+    "overview": "Craftax is a dungeon-crawling, mining, crafting, and combat game across 9 floors (0-8). Progress by finding and opening ladders on each floor (8 monster kills required per floor except the overworld) and descending to the next floor, culminating in a boss fight with the necromancer on floor 8.",
+    "controls_and_interactions": {
+      "movement": "Move with WASD",
+      "interact": "SPACE to mine, attack, drink, eat, or open chests depending on context",
+      "ladders": "DESCEND on downward ladders; ASCEND on upward ladders"
+    },
+    "intrinsics_and_survival": {
+      "intrinsics": [
+        "health",
+        "hunger",
+        "thirst",
+        "energy",
+        "mana"
+      ],
+      "decay_and_recovery": [
+        "Hunger, thirst, and energy naturally decrease; replenish by eating, drinking, and sleeping",
+        "Mana is used for spells/enchanting and recovers naturally",
+        "Health recovers if hunger/thirst/energy > 0; drops if any of them are 0",
+        "Death on health < 0 restarts the game"
+      ],
+      "resting": "When low on health, block yourself in and sleep or rest. Rest executes no-ops until a need decays to 0, the player is attacked, or health is full."
+    },
+    "progression_and_ladders": {
+      "floors": 9,
+      "ladder_rule": "Each floor (except the overworld) requires 8 kills to open the ladder downward",
+      "monsters_killed_stat": "Tracks kills per floor to open ladder",
+      "experience": "Upon first descending to each floor, gain an experience point to assign to attributes (Dexterity, Strength, Intelligence). Each starts at 1, max 5."
+    },
+    "attributes": {
+      "dexterity": "Increases max food/water/energy and slows their decay; increases bow damage",
+      "strength": "Increases melee damage and max health",
+      "intelligence": "Increases max mana, reduces mana decay, increases spell damage and enchant effectiveness"
+    },
+    "potions": {
+      "colors": 6,
+      "effects": "+8 or -3 to health, mana, or energy",
+      "randomization": "Color-effect mapping is randomized per game; identify by experimentation",
+      "found_in": "Chests (notably dungeon/sewers/vaults)"
+    },
+    "floors": [
+      {
+        "index": 0,
+        "name": "Overworld",
+        "environment": "Grasslands, lakes, mountains",
+        "key_actions": [
+          "Mine trees for wood",
+          "Place a crafting table and craft wooden tools adjacent to it",
+          "Use wooden pickaxe to mine stone and craft stone tools",
+          "With stone tools, mine coal and iron",
+          "Place a furnace next to the crafting table and craft iron tools using wood, iron, and coal",
+          "Eat cows, drink from lakes, sleep when tired",
+          "Block yourself in with stone before sleeping",
+          "Collect extra wood for later floors",
+          "Collect seeds/saplings by pressing space on grass and plant them"
+        ],
+        "resources": [
+          "wood",
+          "stone",
+          "coal",
+          "iron",
+          "water",
+          "cows",
+          "saplings/seeds"
+        ],
+        "notes": [
+          "Gather extra wood here; it is rarer in dungeons",
+          "Sleeping is dangerous unless you block yourself in with stone"
+        ]
+      },
+      {
+        "index": 1,
+        "name": "Dungeon",
+        "environment": "Rooms connected by paths; fountains and chests",
+        "key_actions": [
+          "Open the first chest for a bow",
+          "Craft arrows (wood + stone) at a crafting table",
+          "Kill 8 monsters to open the ladder"
+        ],
+        "enemies": [
+          "orc warriors",
+          "orc mages",
+          "snails (edible)"
+        ],
+        "resources": [
+          "fountains (water)",
+          "chests (first chest has bow)"
+        ],
+        "notes": [
+          "Use bow for safer ranged kills",
+          "Rest when low on health if safe"
+        ]
+      },
+      {
+        "index": 2,
+        "name": "Gnomish Mines",
+        "environment": "Dark caverns; requires torches for sight",
+        "key_actions": [
+          "Craft and place torches (wood + coal)",
+          "Mine rich edge veins for ores",
+          "Craft iron or diamond armour",
+          "Kill 8 monsters to open the ladder"
+        ],
+        "resources": [
+          "water pools",
+          "coal",
+          "iron",
+          "diamonds",
+          "sapphires",
+          "rubies",
+          "bats (edible)"
+        ],
+        "enemies": [
+          "gnomes (stronger than orcs)"
+        ],
+        "notes": [
+          "Diamonds craft diamond sword (2) or pickaxe (3)",
+          "Diamond pickaxe mines sapphires and rubies"
+        ]
+      },
+      {
+        "index": 3,
+        "name": "Sewers",
+        "environment": "Dungeon-like; water patches to fill with stone then mine",
+        "key_actions": [
+          "Open first chest for a book to learn fireball or iceball",
+          "Cast spells (2 mana each) for elemental damage",
+          "Use ice enchantment table (9 mana + sapphire) to enchant gear",
+          "Kill 8 monsters to open ladder"
+        ],
+        "enemies": [
+          "lizards (dangerous; can swim)",
+          "kobolds (throw high-damage daggers)"
+        ],
+        "resources": [
+          "water patches",
+          "books (in chests)",
+          "ice enchantment table"
+        ],
+        "notes": [
+          "Spells introduce fire/ice damage types needed later",
+          "Enchant sword/bow adds +50% damage of type, armour reduces damage by 20% per piece"
+        ]
+      },
+      {
+        "index": 4,
+        "name": "Vaults",
+        "environment": "Another dungeon floor",
+        "key_actions": [
+          "Find another book",
+          "Use fire enchantment table",
+          "Kill 8 monsters to open ladder"
+        ],
+        "enemies": [
+          "knights (armoured)",
+          "archers (armoured)"
+        ],
+        "resources": [
+          "fire enchantment table",
+          "books"
+        ],
+        "notes": [
+          "Physical damage is halved; use spells or enchantments"
+        ]
+      },
+      {
+        "index": 5,
+        "name": "Troll Mines",
+        "environment": "Dark caverns, richest ores",
+        "key_actions": [
+          "Mine ores to craft full diamond armour ideally",
+          "Kill 8 monsters to open ladder"
+        ],
+        "enemies": [
+          "trolls (strong)",
+          "deep things (weak in melee, strong ranged; in water)"
+        ],
+        "resources": [
+          "rich ores (diamonds prevalent)"
+        ],
+        "notes": [
+          "Bring torches",
+          "Good place to finish diamond gear"
+        ]
+      },
+      {
+        "index": 6,
+        "name": "Fire Realm",
+        "environment": "Islands separated by lava; build stone bridges",
+        "key_actions": [
+          "Use stone to bridge lava",
+          "Return to floor 5 for water (none here)",
+          "Use ice damage to defeat pig men and fire elementals",
+          "Kill 8 monsters to open ladder"
+        ],
+        "enemies": [
+          "pig men (immune to fire, resist physical)",
+          "fire elementals (immune to fire, resist physical)"
+        ],
+        "resources": [
+          "lots of coal",
+          "rubies"
+        ],
+        "notes": [
+          "No water here",
+          "Ice damage (spell or enchant) recommended/required"
+        ]
+      },
+      {
+        "index": 7,
+        "name": "Ice Realm",
+        "environment": "Dark icy mountains",
+        "key_actions": [
+          "Use fire damage to kill frost trolls and ice elementals",
+          "Return to floor 6 for food (none here)",
+          "Kill 8 monsters to open ladder"
+        ],
+        "enemies": [
+          "frost trolls",
+          "ice elementals"
+        ],
+        "resources": [
+          "sapphires",
+          "rubies"
+        ],
+        "notes": [
+          "Strongest regular enemies; elemental damage required"
+        ]
+      },
+      {
+        "index": 8,
+        "name": "Graveyard (Boss)",
+        "environment": "No ladder out; hunger/thirst/energy do not decay",
+        "key_actions": [
+          "Fight waves of enemies corresponding to previous floors",
+          "Damage necromancer while vulnerable after each wave",
+          "Defeat final wave (ice realm) then kill necromancer to win"
+        ],
+        "enemies": [
+          "Necromancer (final boss)",
+          "Summoned waves from earlier floors"
+        ],
+        "notes": [
+          "No food or water, but needs do not decay",
+          "Use appropriate damage types to handle waves"
+        ]
+      }
+    ],
+    "general_tips": [
+      "Collect lots of wood in the overworld; it is rarer in dungeons",
+      "Block yourself in with stone before sleeping",
+      "Arrows are critical once you get the bow",
+      "Torches are needed on dark levels (Gnomish Mines, Troll Mines, Ice Realm)",
+      "Elemental damage (spells/enchantments) becomes essential in Fire and Ice realms",
+      "Enchanting: sapphire for ice, ruby for fire; 9 mana cost, stand next to the correct table"
+    ]
+  },
+  "skills": [
+    {
+      "skill_name": "Collect Wood",
+      "description": "Harvest wood from trees for crafting.",
+      "floor_availability": [
+        0
+      ],
+      "gain": {
+        "wood": {
+          "type": "inventory",
+          "expression": "lambda n: n"
+        },
+        "achievement:COLLECT_WOOD": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          0
+        ]
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Place Crafting Table",
+      "description": "Place and stand adjacent to a crafting table to enable crafting.",
+      "floor_availability": [],
+      "gain": {
+        "achievement:PLACE_TABLE": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "ephemeral:near_crafting_table": {
+          "type": "ephemeral",
+          "expression": "lambda n: 1",
+          "description": "Adjacent to placed crafting table"
+        }
+      },
+      "requirements": {
+        "wood": "lambda n: 4*n + 0"
+      },
+      "consumption": {
+        "wood": "lambda n: 4*n + 0"
+      },
+      "ephemeral": true
+    },
+    {
+      "skill_name": "Make Wooden Pickaxe",
+      "description": "Craft a wooden pickaxe.",
+      "floor_availability": [],
+      "gain": {
+        "achievement:MAKE_WOOD_PICKAXE": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "pickaxe": {
+          "type": "inventory",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "wood": "lambda n: 3*n + 0",
+        "ephemeral:near_crafting_table": "lambda n: 1*n + 0"
+      },
+      "consumption": {
+        "wood": "lambda n: 3*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Make Wooden Sword",
+      "description": "Craft a wooden sword.",
+      "floor_availability": [],
+      "gain": {
+        "achievement:MAKE_WOOD_SWORD": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "sword": {
+          "type": "inventory",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "wood": "lambda n: 2*n + 0",
+        "ephemeral:near_crafting_table": "lambda n: 1"
+      },
+      "consumption": {
+        "wood": "lambda n: 2*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Mine Stone",
+      "description": "Mine stone for tools, shelter, and bridges.",
+      "floor_availability": [
+        0
+      ],
+      "gain": {
+        "stone": {
+          "type": "inventory",
+          "expression": "lambda n: n"
+        },
+        "achievement:COLLECT_STONE": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          0
+        ],
+        "pickaxe": "lambda n: 1"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Make Stone Pickaxe",
+      "description": "Craft a stone pickaxe.",
+      "floor_availability": [],
+      "gain": {
+        "achievement:MAKE_STONE_PICKAXE": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "pickaxe": {
+          "type": "inventory",
+          "expression": "lambda n: 2"
+        }
+      },
+      "requirements": {
+        "wood": "lambda n: 2*n + 0",
+        "stone": "lambda n: 3*n + 0",
+        "ephemeral:near_crafting_table": "lambda n: 0*n + 1"
+      },
+      "consumption": {
+        "wood": "lambda n: 2*n + 0",
+        "stone": "lambda n: 3*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Make Stone Sword",
+      "description": "Craft a stone sword.",
+      "floor_availability": [],
+      "gain": {
+        "achievement:MAKE_STONE_SWORD": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "sword": {
+          "type": "inventory",
+          "expression": "lambda n: 2"
+        }
+      },
+      "requirements": {
+        "wood": "lambda n: 1*n + 0",
+        "stone": "lambda n: 2*n + 0",
+        "ephemeral:near_crafting_table": "lambda n: 1*n + 0"
+      },
+      "consumption": {
+        "wood": "lambda n: 1*n + 0",
+        "stone": "lambda n: 2*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Collect Coal",
+      "description": "Mine coal for smelting and torches.",
+      "floor_availability": [
+        0,
+        2,
+        6
+      ],
+      "gain": {
+        "coal": {
+          "type": "inventory",
+          "expression": "lambda n: n"
+        },
+        "achievement:COLLECT_COAL": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          0,
+          2,
+          6
+        ],
+        "pickaxe": "lambda n: 2*n + 0"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Collect Iron",
+      "description": "Mine iron ore for improved tools and armour.",
+      "floor_availability": [
+        0,
+        2
+      ],
+      "gain": {
+        "iron": {
+          "type": "inventory",
+          "expression": "lambda n: n"
+        },
+        "achievement:COLLECT_IRON": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          0,
+          2
+        ],
+        "pickaxe": "lambda n: 2"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Place Furnace",
+      "description": "Place a furnace and stand adjacent to both furnace and crafting table for advanced crafting.",
+      "floor_availability": [],
+      "gain": {
+        "achievement:PLACE_FURNACE": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "ephemeral:near_furnace": {
+          "type": "ephemeral",
+          "expression": "lambda n: 1",
+          "description": "Adjacent to placed furnace"
+        }
+      },
+      "requirements": {
+        "stone": "lambda n: 8*n",
+        "ephemeral:near_crafting_table": "lambda n: 1"
+      },
+      "consumption": {
+        "stone": "lambda n: 8*n"
+      },
+      "ephemeral": true
+    },
+    {
+      "skill_name": "Make Iron Pickaxe",
+      "description": "Craft an iron pickaxe using the furnace and crafting table.",
+      "floor_availability": [],
+      "gain": {
+        "achievement:MAKE_IRON_PICKAXE": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "pickaxe": {
+          "type": "inventory",
+          "expression": "lambda n: 3"
+        }
+      },
+      "requirements": {
+        "ephemeral:near_crafting_table": "lambda n: 1*n + 0",
+        "ephemeral:near_furnace": "lambda n: 1*n + 0",
+        "wood": "lambda n: 2*n + 0",
+        "iron": "lambda n: 3*n + 0",
+        "coal": "lambda n: 3*n + 0"
+      },
+      "consumption": {
+        "wood": "lambda n: 2*n + 0",
+        "iron": "lambda n: 3*n + 0",
+        "coal": "lambda n: 3*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Make Iron Sword",
+      "description": "Craft an iron sword using the furnace and crafting table.",
+      "floor_availability": [],
+      "gain": {
+        "achievement:MAKE_IRON_SWORD": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "sword": {
+          "type": "inventory",
+          "expression": "lambda n: 3"
+        }
+      },
+      "requirements": {
+        "wood": "lambda n: 1*n + 0",
+        "iron": "lambda n: 2*n + 0",
+        "coal": "lambda n: 1*n + 0",
+        "ephemeral:near_crafting_table": "lambda n: 1*n + 0",
+        "ephemeral:near_furnace": "lambda n: 1*n + 0"
+      },
+      "consumption": {
+        "wood": "lambda n: 1*n + 0",
+        "iron": "lambda n: 2*n + 0",
+        "coal": "lambda n: 1*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Eat Cow",
+      "description": "Eat cow meat to restore hunger.",
+      "floor_availability": [
+        0
+      ],
+      "gain": {
+        "achievement:EAT_COW": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          0
+        ],
+        "sword": "lambda n: 1"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Drink Water",
+      "description": "Drink water from lakes, fountains, or pools.",
+      "floor_availability": [
+        0,
+        1,
+        2,
+        3,
+        5
+      ],
+      "gain": {
+        "achievement:COLLECT_DRINK": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          0,
+          1,
+          2,
+          3,
+          5
+        ]
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Place Stone",
+      "description": "Place stone blocks for shelter, filling water patches, or bridging lava.",
+      "floor_availability": [
+        0,
+        3,
+        6
+      ],
+      "gain": {
+        "achievement:PLACE_STONE": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          0,
+          3,
+          6
+        ],
+        "stone": "lambda n: 1*n + 0"
+      },
+      "consumption": {
+        "stone": "lambda n: 1*n + 0"
+      },
+      "ephemeral": true
+    },
+    {
+      "skill_name": "Wake Up From Sleep",
+      "description": "Sleep safely and wake up to restore energy.",
+      "floor_availability": [],
+      "gain": {
+        "achievement:WAKE_UP": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "stone": "lambda n: 8*n + 0"
+      },
+      "consumption": {
+        "stone": "lambda n: 8*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Collect Sapling",
+      "description": "Collect saplings/seeds from grass for planting.",
+      "floor_availability": [
+        0
+      ],
+      "gain": {
+        "sapling": {
+          "type": "inventory",
+          "expression": "lambda n: n"
+        },
+        "achievement:COLLECT_SAPLING": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          0
+        ]
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Place Plant",
+      "description": "Plant seeds to grow future food.",
+      "floor_availability": [
+        0
+      ],
+      "gain": {
+        "achievement:PLACE_PLANT": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          0
+        ],
+        "sapling": "lambda n: 1*n + 0"
+      },
+      "consumption": {
+        "sapling": "lambda n: 1*n + 0"
+      },
+      "ephemeral": true
+    },
+    {
+      "skill_name": "Eat Plant",
+      "description": "Eat harvested plant-based food.",
+      "floor_availability": [
+        0
+      ],
+      "gain": {
+        "achievement:EAT_PLANT": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          0
+        ],
+        "achievement:PLACE_PLANT": "lambda n: 1"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Descend to Dungeon (Floor 1)",
+      "description": "Use the ladder to descend from the overworld to the dungeon.",
+      "floor_availability": [
+        0
+      ],
+      "gain": {
+        "achievement:ENTER_DUNGEON": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "level:player_level": {
+          "type": "level",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          0
+        ],
+        "pickaxe": "lambda n: 1"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Open Chest",
+      "description": "Open a chest found in dungeon-like floors to obtain items.",
+      "floor_availability": [
+        1,
+        3,
+        4
+      ],
+      "gain": {
+        "achievement:OPEN_CHEST": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          1,
+          3,
+          4
+        ]
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Find Bow",
+      "description": "Obtain the bow from the first chest on floor 1.",
+      "floor_availability": [
+        1
+      ],
+      "gain": {
+        "achievement:FIND_BOW": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "bow": {
+          "type": "inventory",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          1
+        ],
+        "sword": "lambda n: 1*n + 0"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Make Arrows",
+      "description": "Craft arrows at a crafting table (wood + stone).",
+      "floor_availability": [],
+      "gain": {
+        "achievement:MAKE_ARROW": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "arrows": {
+          "type": "inventory",
+          "expression": "lambda n: n"
+        }
+      },
+      "requirements": {
+        "wood": "lambda n: 1*n + 0",
+        "stone": "lambda n: 1*n + 0",
+        "ephemeral:near_crafting_table": "lambda n: 0*n + 1"
+      },
+      "consumption": {
+        "wood": "lambda n: 1*n + 0",
+        "stone": "lambda n: 1*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Fire Bow",
+      "description": "Use the bow to perform a ranged attack.",
+      "floor_availability": [],
+      "gain": {
+        "achievement:FIRE_BOW": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "bow": "lambda n: 0*n + 1",
+        "arrows": "lambda n: 1*n + 0"
+      },
+      "consumption": {
+        "arrows": "lambda n: 1*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Open Ladder on Floor 1",
+      "description": "Accumulate 8 monster kills on floor 1 to open its ladder.",
+      "floor_availability": [
+        1
+      ],
+      "gain": {
+        "stat:monsters_killed:1": {
+          "type": "stat",
+          "expression": "lambda n: 8"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 1",
+        "bow": "lambda n: 1",
+        "sword": "lambda n: 1",
+        "arrows": "lambda n: 16"
+      },
+      "consumption": {
+        "arrows": "lambda n: 16"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Descend to Gnomish Mines (Floor 2)",
+      "description": "Use the opened ladder in the dungeon to reach the gnomish mines.",
+      "floor_availability": [
+        1
+      ],
+      "gain": {
+        "achievement:ENTER_GNOMISH_MINES": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "level:player_level": {
+          "type": "level",
+          "expression": "lambda n: 2"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          1
+        ],
+        "stat:monsters_killed:1": "lambda n: 8"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Make Torches",
+      "description": "Craft torches using wood and coal.",
+      "floor_availability": [],
+      "gain": {
+        "achievement:MAKE_TORCH": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "torches": {
+          "type": "inventory",
+          "expression": "lambda n: n"
+        }
+      },
+      "requirements": {
+        "wood": "lambda n: 1*n + 0",
+        "coal": "lambda n: 1*n + 0",
+        "ephemeral:near_crafting_table": "lambda n: 0*n + 1"
+      },
+      "consumption": {
+        "wood": "lambda n: 1*n + 0",
+        "coal": "lambda n: 1*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Place Torch",
+      "description": "Place torches to see on dark levels.",
+      "floor_availability": [
+        2,
+        5,
+        7
+      ],
+      "gain": {
+        "achievement:PLACE_TORCH": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 2",
+        "torches": "lambda n: n"
+      },
+      "consumption": {
+        "torches": "lambda n: n"
+      },
+      "ephemeral": true
+    },
+    {
+      "skill_name": "Eat Bat",
+      "description": "Eat a bat in the gnomish mines.",
+      "floor_availability": [
+        2
+      ],
+      "gain": {
+        "achievement:EAT_BAT": "lambda n: 1"
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 2",
+        "torches": "lambda n: 2*n + 0"
+      },
+      "consumption": {
+        "torches": "lambda n: 2*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Collect Diamond",
+      "description": "Mine diamonds for top-tier tools and armour.",
+      "floor_availability": [
+        2,
+        5
+      ],
+      "gain": {
+        "diamond": {
+          "type": "inventory",
+          "expression": "lambda n: n"
+        },
+        "achievement:COLLECT_DIAMOND": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 2",
+        "pickaxe": "lambda n: 3",
+        "torches": "lambda n: 4"
+      },
+      "consumption": {
+        "torches": "lambda n: 4*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Craft Diamond Pickaxe",
+      "description": "Craft a diamond pickaxe (enables mining sapphires and rubies).",
+      "floor_availability": [],
+      "gain": {
+        "achievement:MAKE_DIAMOND_PICKAXE": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "pickaxe": {
+          "type": "inventory",
+          "expression": "lambda n: 4"
+        }
+      },
+      "requirements": {
+        "diamond": "lambda n: 3*n + 0",
+        "wood": "lambda n: 2*n + 0",
+        "ephemeral:near_crafting_table": "lambda n: 1*n + 0"
+      },
+      "consumption": {
+        "diamond": "lambda n: 3*n + 0",
+        "wood": "lambda n: 2*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Craft Diamond Sword",
+      "description": "Craft a diamond sword.",
+      "floor_availability": [],
+      "gain": {
+        "achievement:MAKE_DIAMOND_SWORD": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "sword": {
+          "type": "inventory",
+          "expression": "lambda n: 4"
+        }
+      },
+      "requirements": {
+        "diamond": "lambda n: 2*n",
+        "ephemeral:near_crafting_table": "lambda n: 1"
+      },
+      "consumption": {
+        "diamond": "lambda n: 2*n"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Craft Iron Armour",
+      "description": "Craft iron armour pieces (3 iron + 3 coal per piece).",
+      "floor_availability": [],
+      "gain": {
+        "achievement:MAKE_IRON_ARMOUR": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "iron": "lambda n: 3*n + 0",
+        "coal": "lambda n: 3*n + 0",
+        "ephemeral:near_crafting_table": "lambda n: 1*n + 0",
+        "ephemeral:near_furnace": "lambda n: 1*n + 0"
+      },
+      "consumption": {
+        "iron": "lambda n: 3*n + 0",
+        "coal": "lambda n: 3*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Craft Diamond Armour",
+      "description": "Craft diamond armour pieces (3 diamonds per piece).",
+      "floor_availability": [],
+      "gain": {
+        "achievement:MAKE_DIAMOND_ARMOUR": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "diamond": "lambda n: 3*n",
+        "ephemeral:near_crafting_table": "lambda n: 1"
+      },
+      "consumption": {
+        "diamond": "lambda n: 3*n"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Collect Sapphire",
+      "description": "Mine sapphires for ice enchantments.",
+      "floor_availability": [
+        2,
+        7
+      ],
+      "gain": {
+        "sapphire": {
+          "type": "inventory",
+          "expression": "lambda n: n"
+        },
+        "achievement:COLLECT_SAPPHIRE": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 0*n + 2",
+        "pickaxe": "lambda n: 0*n + 4",
+        "torches": "lambda n: 3*n + 0",
+        "bow": "lambda n: 0*n + 1",
+        "arrows": "lambda n: 5*n + 0",
+        "sword": "lambda n: 0*n + 3"
+      },
+      "consumption": {
+        "torches": "lambda n: 3*n + 0",
+        "arrows": "lambda n: 5*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Collect Ruby",
+      "description": "Mine rubies for fire enchantments.",
+      "floor_availability": [
+        2,
+        6,
+        7
+      ],
+      "gain": {
+        "ruby": {
+          "type": "inventory",
+          "expression": "lambda n: n"
+        },
+        "achievement:COLLECT_RUBY": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 2",
+        "pickaxe": "lambda n: 4",
+        "torches": "lambda n: 2*n + 0",
+        "stone": "lambda n: 8*n + 0"
+      },
+      "consumption": {
+        "torches": "lambda n: 2*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Open Ladder on Floor 2",
+      "description": "Accumulate 8 monster kills on floor 2 to open its ladder.",
+      "floor_availability": [
+        2
+      ],
+      "gain": {
+        "stat:monsters_killed:2": {
+          "type": "stat",
+          "expression": "lambda n: 8"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 2",
+        "bow": "lambda n: 1",
+        "sword": "lambda n: 2",
+        "arrows": "lambda n: 24*n + 0",
+        "torches": "lambda n: 12*n + 0"
+      },
+      "consumption": {
+        "arrows": "lambda n: 24*n + 0",
+        "torches": "lambda n: 12*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Descend to Sewers (Floor 3)",
+      "description": "Use the opened ladder in the gnomish mines to reach the sewers.",
+      "floor_availability": [
+        2
+      ],
+      "gain": {
+        "achievement:ENTER_SEWERS": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "level:player_level": {
+          "type": "level",
+          "expression": "lambda n: 3"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          2
+        ],
+        "stat:monsters_killed:2": "lambda n: 8",
+        "torches": "lambda n: 6*n",
+        "bow": "lambda n: 1",
+        "arrows": "lambda n: 6*n",
+        "sword": "lambda n: 2"
+      },
+      "consumption": {
+        "torches": "lambda n: 6*n",
+        "arrows": "lambda n: 6*n"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Collect Book",
+      "description": "Obtain a book from a chest to learn a spell.",
+      "floor_availability": [
+        3,
+        4
+      ],
+      "gain": {
+        "books": {
+          "type": "inventory",
+          "expression": "lambda n: n"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 0*n + 3",
+        "bow": "lambda n: 1*n + 0",
+        "arrows": "lambda n: 10*n + 0",
+        "sword": "lambda n: 1*n + 0"
+      },
+      "consumption": {
+        "arrows": "lambda n: 8*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Learn Fireball",
+      "description": "Read a book to learn the fireball spell.",
+      "floor_availability": [
+        3,
+        4
+      ],
+      "gain": {
+        "achievement:LEARN_FIREBALL": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 3",
+        "books": "lambda n: 1"
+      },
+      "consumption": {
+        "books": "lambda n: 1"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Cast Fireball",
+      "description": "Cast the fireball spell (2 mana).",
+      "floor_availability": [
+        3,
+        4,
+        6,
+        7,
+        8
+      ],
+      "gain": {
+        "achievement:CAST_FIREBALL": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "achievement:LEARN_FIREBALL": "lambda n: 1",
+        "level:player_level": "lambda n: 3"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Learn Iceball",
+      "description": "Read a book to learn the iceball spell.",
+      "floor_availability": [
+        3,
+        4
+      ],
+      "gain": {
+        "achievement:LEARN_ICEBALL": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 3",
+        "books": "lambda n: n"
+      },
+      "consumption": {
+        "books": "lambda n: n"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Cast Iceball",
+      "description": "Cast the iceball spell (2 mana).",
+      "floor_availability": [
+        3,
+        4,
+        6,
+        7,
+        8
+      ],
+      "gain": {
+        "achievement:CAST_ICEBALL": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "achievement:LEARN_ICEBALL": "lambda n: 1",
+        "level:player_level": "lambda n: 3"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Enchant Sword (Ice)",
+      "description": "Use the ice enchantment table with a sapphire and 9 mana to enchant the sword.",
+      "floor_availability": [
+        3
+      ],
+      "gain": {
+        "achievement:ENCHANT_SWORD": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          3
+        ],
+        "sword": "lambda n: 1*n + 0",
+        "sapphire": "lambda n: 1*n + 0"
+      },
+      "consumption": {
+        "sapphire": "lambda n: 1*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Enchant Armour (Ice)",
+      "description": "Use the ice enchantment table with sapphires and 9 mana per piece to enchant armour.",
+      "floor_availability": [
+        3
+      ],
+      "gain": {
+        "achievement:ENCHANT_ARMOUR": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "sapphire": "lambda n: 1*n + 0",
+        "level:player_level": "lambda n: 0*n + 3"
+      },
+      "consumption": {
+        "sapphire": "lambda n: 1*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Open Ladder on Floor 3",
+      "description": "Accumulate 8 monster kills on floor 3 to open its ladder.",
+      "floor_availability": [
+        3
+      ],
+      "gain": {
+        "stat:monsters_killed:3": {
+          "type": "stat",
+          "expression": "lambda n: 8"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 3",
+        "bow": "lambda n: 1",
+        "arrows": "lambda n: 20",
+        "sword": "lambda n: 2",
+        "stone": "lambda n: 10"
+      },
+      "consumption": {
+        "arrows": "lambda n: 20",
+        "stone": "lambda n: 10"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Descend to Vaults (Floor 4)",
+      "description": "Use the opened ladder in the sewers to reach the vaults.",
+      "floor_availability": [
+        3
+      ],
+      "gain": {
+        "achievement:ENTER_VAULT": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "level:player_level": {
+          "type": "level",
+          "expression": "lambda n: 4"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 3",
+        "stat:monsters_killed:3": "lambda n: 8"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Enchant Sword (Fire)",
+      "description": "Use the fire enchantment table with a ruby and 9 mana to enchant the sword.",
+      "floor_availability": [
+        4
+      ],
+      "gain": {
+        "achievement:ENCHANT_SWORD": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          4
+        ],
+        "sword": "lambda n: 1*n + 0",
+        "ruby": "lambda n: 1*n + 0"
+      },
+      "consumption": {
+        "ruby": "lambda n: 1*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Enchant Armour (Fire)",
+      "description": "Use the fire enchantment table with rubies and 9 mana per piece to enchant armour.",
+      "floor_availability": [
+        4
+      ],
+      "gain": {
+        "achievement:ENCHANT_ARMOUR": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 4",
+        "ruby": "lambda n: n"
+      },
+      "consumption": {
+        "ruby": "lambda n: n"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Open Ladder on Floor 4",
+      "description": "Accumulate 8 monster kills on floor 4 to open its ladder.",
+      "floor_availability": [
+        4
+      ],
+      "gain": {
+        "stat:monsters_killed:4": {
+          "type": "stat",
+          "expression": "lambda n: 8"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 4",
+        "sword": "lambda n: 3",
+        "bow": "lambda n: 1",
+        "arrows": "lambda n: 32"
+      },
+      "consumption": {
+        "arrows": "lambda n: 32"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Descend to Troll Mines (Floor 5)",
+      "description": "Use the opened ladder in the vaults to reach the troll mines.",
+      "floor_availability": [
+        4
+      ],
+      "gain": {
+        "achievement:ENTER_TROLL_MINES": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "level:player_level": {
+          "type": "level",
+          "expression": "lambda n: 5"
+        }
+      },
+      "requirements": {
+        "level:player_level": [
+          4
+        ],
+        "stat:monsters_killed:4": "lambda n: 8"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Open Ladder on Floor 5",
+      "description": "Accumulate 8 monster kills on floor 5 to open its ladder.",
+      "floor_availability": [
+        5
+      ],
+      "gain": {
+        "stat:monsters_killed:5": {
+          "type": "stat",
+          "expression": "lambda n: 8"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 5",
+        "sword": "lambda n: 3",
+        "bow": "lambda n: 1",
+        "arrows": "lambda n: 16",
+        "torches": "lambda n: 8",
+        "achievement:MAKE_DIAMOND_ARMOUR": "lambda n: 1"
+      },
+      "consumption": {
+        "arrows": "lambda n: 16",
+        "torches": "lambda n: 8"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Descend to Fire Realm (Floor 6)",
+      "description": "Use the opened ladder in the troll mines to reach the fire realm.",
+      "floor_availability": [
+        5
+      ],
+      "gain": {
+        "achievement:ENTER_FIRE_REALM": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "level:player_level": {
+          "type": "level",
+          "expression": "lambda n: 6"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 5",
+        "stat:monsters_killed:5": "lambda n: 8"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Open Ladder on Floor 6",
+      "description": "Accumulate 8 monster kills on floor 6 to open its ladder.",
+      "floor_availability": [
+        6
+      ],
+      "gain": {
+        "stat:monsters_killed:6": {
+          "type": "stat",
+          "expression": "lambda n: 8"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 0*n + 6",
+        "achievement:LEARN_ICEBALL": "lambda n: 1",
+        "stone": "lambda n: 30"
+      },
+      "consumption": {
+        "stone": "lambda n: 25"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Descend to Ice Realm (Floor 7)",
+      "description": "Use the opened ladder in the fire realm to reach the ice realm.",
+      "floor_availability": [
+        6
+      ],
+      "gain": {
+        "achievement:ENTER_ICE_REALM": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "level:player_level": {
+          "type": "level",
+          "expression": "lambda n: 7"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 6",
+        "stat:monsters_killed:6": "lambda n: 8",
+        "stone": "lambda n: 15*n + 0"
+      },
+      "consumption": {
+        "stone": "lambda n: 10*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Open Ladder on Floor 7",
+      "description": "Accumulate 8 monster kills on floor 7 to open its ladder.",
+      "floor_availability": [
+        7
+      ],
+      "gain": {
+        "stat:monsters_killed:7": {
+          "type": "stat",
+          "expression": "lambda n: 8"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 7",
+        "torches": "lambda n: 16*n + 0",
+        "achievement:ENCHANT_SWORD": "lambda n: 1",
+        "sword": "lambda n: 4",
+        "achievement:MAKE_DIAMOND_ARMOUR": "lambda n: 1"
+      },
+      "consumption": {
+        "torches": "lambda n: 16*n + 0"
+      },
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Descend to Graveyard (Floor 8)",
+      "description": "Use the opened ladder in the ice realm to reach the graveyard (boss level).",
+      "floor_availability": [
+        7
+      ],
+      "gain": {
+        "achievement:ENTER_GRAVEYARD": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        },
+        "level:player_level": {
+          "type": "level",
+          "expression": "lambda n: 8"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 7",
+        "stat:monsters_killed:7": "lambda n: 8"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Damage Necromancer",
+      "description": "Damage the necromancer during his vulnerable state after defeating a wave.",
+      "floor_availability": [
+        8
+      ],
+      "gain": {
+        "achievement:DAMAGE_NECROMANCER": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 8"
+      },
+      "consumption": {},
+      "ephemeral": false
+    },
+    {
+      "skill_name": "Defeat Necromancer",
+      "description": "Defeat the necromancer after the final wave to win the game.",
+      "floor_availability": [
+        8
+      ],
+      "gain": {
+        "achievement:DEFEAT_NECROMANCER": {
+          "type": "achievement",
+          "expression": "lambda n: 1"
+        }
+      },
+      "requirements": {
+        "level:player_level": "lambda n: 8",
+        "bow": "lambda n: 1",
+        "arrows": "lambda n: 80*n + 0",
+        "sword": "lambda n: 4",
+        "achievement:LEARN_FIREBALL": "lambda n: 1",
+        "achievement:LEARN_ICEBALL": "lambda n: 1",
+        "achievement:MAKE_DIAMOND_ARMOUR": "lambda n: 1"
+      },
+      "consumption": {
+        "arrows": "lambda n: 80*n + 0"
+      },
+      "ephemeral": false
+    }
+  ]
+}

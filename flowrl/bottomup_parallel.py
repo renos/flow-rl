@@ -117,6 +117,8 @@ if __name__ == "__main__":
     parser.add_argument("--frame_gen_max_frames", type=int, default=1000)
     parser.add_argument("--skill_timesteps_budget", type=lambda x: int(float(x)), default=10_000_000,
                         help="Combined budget (timesteps) per skill across Phase A+B")
+    parser.add_argument("--target_skill", type=str, required=True,
+                        help="Target skill name from the knowledgebase to train towards")
 
     # Iteration tracking (compatibility with Flow)
     parser.add_argument("--current_i", type=int, default=0,
@@ -136,6 +138,26 @@ if __name__ == "__main__":
     parser.add_argument("--conda_env", type=str, default="jax",
                         help="Name of the conda environment to activate inside tmux before training (e.g., 'jax').")
 
+    # PPO Flow variant selection
+    parser.add_argument("--ppo_flow_variant", type=str, default="ppo_flow", choices=["ppo_flow", "ppo_flow_w_reset"],
+                       help="Which PPO flow variant to use for training")
+
+    # Parameters specific to ppo_flow_w_reset
+    parser.add_argument("--latest_reset_prob", type=float, default=0.0,
+                       help="Probability of resetting to latest state (only for ppo_flow_w_reset)")
+    parser.add_argument("--progressive_reset_curriculum", action=argparse.BooleanOptionalAction, default=False,
+                       help="Enable progressive reset curriculum (only for ppo_flow_w_reset)")
+    parser.add_argument("--progressive_reset_threshold", type=float, default=0.2,
+                       help="Threshold for advancing in progressive curriculum (only for ppo_flow_w_reset)")
+    parser.add_argument("--per_skill_balance", action=argparse.BooleanOptionalAction, default=True,
+                       help="Balance resets per skill (only for ppo_flow_w_reset)")
+    parser.add_argument("--per_skill_balance_threshold", type=int, default=64,
+                       help="Threshold for per-skill balancing (only for ppo_flow_w_reset)")
+    parser.add_argument("--per_skill_balance_cap", type=float, default=4.0,
+                       help="Cap for per-skill balancing (only for ppo_flow_w_reset)")
+    parser.add_argument("--success_rate_ema_alpha", type=float, default=0.15,
+                       help="EMA alpha for success rate tracking (only for ppo_flow_w_reset)")
+
     args, rest_args = parser.parse_known_args(sys.argv[1:])
 
     args.graph_path = args.graph_path.replace("$PROJECT_DIR", str(Path(__file__).parent.parent))
@@ -153,6 +175,23 @@ if __name__ == "__main__":
 
     # Initialize Flow graph
     flow_graph = Flow(args)
+
+    # Load previously completed skills from scheduler state (for restart support)
+    scheduler_state_file = graph_path / "scheduler_state.json"
+    if scheduler_state_file.exists():
+        print(f"Loading completed skills from scheduler state...")
+        with open(scheduler_state_file, 'r') as f:
+            scheduler_state = json.load(f)
+        loaded_count = 0
+        for skill_id, skill_info in scheduler_state.get("skills", {}).items():
+            if skill_info.get("status") == "completed":
+                skill_name = skill_info.get("skill_name")
+                skill_data = skill_info.get("skill_data")
+                if skill_name and skill_data:
+                    flow_graph.skills[skill_name] = skill_data
+                    loaded_count += 1
+        if loaded_count > 0:
+            print(f"  ✓ Loaded {loaded_count} completed skills into Flow graph")
 
     # Initialize scheduler
     # Determine GPU list: CLI arg > env CUDA_VISIBLE_DEVICES > fallback ["0"]
@@ -176,6 +215,14 @@ if __name__ == "__main__":
         frame_gen_envs=args.frame_gen_envs,
         frame_gen_max_frames=args.frame_gen_max_frames,
         env_name=args.env_name,
+        ppo_flow_variant=args.ppo_flow_variant,
+        latest_reset_prob=args.latest_reset_prob,
+        progressive_reset_curriculum=args.progressive_reset_curriculum,
+        progressive_reset_threshold=args.progressive_reset_threshold,
+        per_skill_balance=args.per_skill_balance,
+        per_skill_balance_threshold=args.per_skill_balance_threshold,
+        per_skill_balance_cap=args.per_skill_balance_cap,
+        success_rate_ema_alpha=args.success_rate_ema_alpha,
     )
 
     # Set up callbacks
@@ -319,6 +366,7 @@ if __name__ == "__main__":
 
     print(f"\n{'='*70}")
     print(f"Starting Parallel Bottom-Up Skill Learning")
+    print(f"  Target skill: {args.target_skill}")
     print(f"  Max skills: {args.max_nodes}")
     print(f"  Max parallel: {min(args.max_parallel_skills, len(gpu_list))} (GPUs: {','.join(gpu_list)})")
     print(f"  Conda env: {args.conda_env}")
@@ -341,21 +389,15 @@ if __name__ == "__main__":
             print(f"  Currently training: {currently_training if currently_training else 'none'}")
             print(f"{'─'*70}")
 
-            # Generate next skill
+            # Generate next skill from knowledgebase based on target skill
             if True:
-                skill_name, skill_data = flow_graph.next_skill()
-                decision = flow_graph.db.get("current", {}).get("decision")
-                if decision and decision.get("action") == "continue_training":
-                    # LLM requested to continue training an existing skill instead of proposing a new one
-                    target = decision.get("skill_name")
-                    extra = int(decision.get("extra_timesteps", 0))
-                    print(f"  → LLM decision: continue_training '{target}' for {extra:,} timesteps")
-                    try:
-                        scheduler.enqueue_continuation(target, extra)
-                    except Exception as ce:
-                        print(f"  ! Failed to enqueue continuation for '{target}': {ce}")
-                    # Skip new skill generation in this iteration
-                    continue
+                skill_name, skill_data = flow_graph.select_next_skill_from_knowledgebase(args.target_skill)
+
+                # Check if all skills are completed or training
+                if skill_name is None:
+                    print(f"  → All skills for target '{args.target_skill}' are completed or in training")
+                    break
+
                 # Note: skill is now in flow_graph.training_skills
 
                 # Build full execution plan like sequential path (temporary include current skill)
@@ -461,10 +503,17 @@ if __name__ == "__main__":
                 frontier_blocked = False
                 print(f"  → Frontier unblocked - resuming generation")
 
-        # Check if we're done
+        # Check if we're done - either max_nodes reached or target skill completed
         if total_skills_generated >= args.max_nodes and scheduler._is_complete():
             print(f"\n{'='*70}")
-            print(f"All {args.max_nodes} skills generated and training complete!")
+            print(f"Max skills ({args.max_nodes}) reached and all training complete!")
+            print(f"{'='*70}\n")
+            break
+
+        # Check if target skill is completed
+        if args.target_skill in flow_graph.skills and scheduler._is_complete():
+            print(f"\n{'='*70}")
+            print(f"Target skill '{args.target_skill}' completed successfully!")
             print(f"{'='*70}\n")
             break
 

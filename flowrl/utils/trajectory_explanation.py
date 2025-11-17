@@ -41,7 +41,7 @@ def extract_first_valid_subsequence(env_states, actions, start_value=12, end_val
 
     # Return the slice of the entire env_states for this range, including both start and end values
     return (
-        jax.tree_map(
+        jax.tree.map(
             lambda x: (
                 x[start_idx + 1 : end_idx + 1] if hasattr(x, "__getitem__") else x
             ),
@@ -82,8 +82,12 @@ def explain_inventory_changes(subseq, actions, game="craftax"):
     """
     explanations = []
     inventory_diff = subseq.inventory_diff
+    inventory = getattr(subseq, "inventory", None)
     achievements_diff = getattr(subseq, "achievements_diff", None)
     achievements = getattr(subseq, "achievements", None)
+
+    # Track action usage for summary
+    action_histogram = {}
 
     # Level / stat fields that may exist on Craftax environments
     level_fields = []
@@ -189,26 +193,47 @@ def explain_inventory_changes(subseq, actions, game="craftax"):
                     f"Descended to level {curr_lvl} (monsters_killed on level {prev_lvl}: {kills_prev_floor})"
                 )
 
+        # Track all actions for histogram (even if no inventory change)
+        action_idx = int(actions[t])
+        try:
+            if game == "craftax":
+                action_name = CraftaxAction(action_idx).name
+            else:
+                action_name = ClassicAction(action_idx).name
+        except (ValueError, IndexError):
+            action_name = f"UNKNOWN_ACTION_{action_idx}"
+
+        action_histogram[action_name] = action_histogram.get(action_name, 0) + 1
+
         # If there were any changes at this timestep, add an explanation with the action
         if timestep_changes:
-            # Get the action index for this timestep
-            action_idx = int(actions[t])
-
-            # Convert action index to action name based on game type
-            try:
-                if game == "craftax":
-                    action_name = CraftaxAction(action_idx).name
-                else:
-                    action_name = ClassicAction(action_idx).name
-            except (ValueError, IndexError):
-                action_name = f"UNKNOWN_ACTION_{action_idx}"
-
-            explanation = f"Timestep {t}: Action: {action_name}, " + ", ".join(
-                timestep_changes
-            )
+            explanation = f"Timestep {t}: Action: {action_name}, " + ", ".join(timestep_changes)
             explanations.append(explanation)
 
-    return explanations
+    # Determine starting floor
+    starting_floor = 0
+    if "player_level" in level_fields:
+        lvl_vals = getattr(subseq, "player_level")
+        if len(lvl_vals) > 0:
+            starting_floor = int(lvl_vals[0])
+
+    # Add action summary at the beginning
+    action_summary = [f"=== STARTING FLOOR: {starting_floor} ==="]
+    action_summary.append("")
+    action_summary.append("=== ACTION SUMMARY ===")
+    action_summary.append("All actions performed during this trajectory:")
+
+    # Sort by frequency (descending)
+    sorted_actions = sorted(action_histogram.items(), key=lambda x: x[1], reverse=True)
+    for action_name, count in sorted_actions:
+        if count > 0:
+            action_summary.append(f"  {action_name}: {count} times")
+    action_summary.append("")
+    action_summary.append("=== TIMESTEPS WITH CHANGES ===")
+    action_summary.append("(Shows timesteps where inventory, achievements, or levels changed)")
+    action_summary.append("(Floor changes are explicitly noted in the timestep descriptions)")
+
+    return action_summary + explanations
 
 
 def explain_trajectory(env_states, actions, start_state, game="craftax"):

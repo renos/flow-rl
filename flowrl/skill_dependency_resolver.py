@@ -49,24 +49,28 @@ class SkillDependencyResolver:
         self.skills = skills
         self.max_inventory_capacity = max_inventory_capacity
         
-    def resolve_dependencies(self, target_skill_name, n=1):
+    def resolve_dependencies(self, target_skill_name, n=1, inline_ephemeral=False):
         """
         Build a dependency graph and prune it to remove unnecessary tool productions.
-        
+
         Args:
             target_skill_name: Name of the skill to build dependencies for
             n: Number of times to apply this skill
-            
+            inline_ephemeral: Whether to inline ephemeral skills (for code gen) or keep them (for training order)
+
         Returns:
             List of skills in execution order
         """
         if target_skill_name not in self.skills:
             raise ValueError(f"Skill '{target_skill_name}' not found in skills")
-        
+
         print(f"Building dependency graph for skill '{target_skill_name}' (n={n})")
-        
-        # Preprocess skills to inline ephemeral requirements
-        processed_skills = self._inline_ephemeral_requirements()
+
+        # Preprocess skills to inline ephemeral requirements (only if requested)
+        if inline_ephemeral:
+            processed_skills = self._inline_ephemeral_requirements()
+        else:
+            processed_skills = self.skills
         
         # Build the complete dependency graph using processed skills
         root_node = self._build_graph(target_skill_name, n, processed_skills=processed_skills)

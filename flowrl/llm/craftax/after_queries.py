@@ -782,15 +782,15 @@ class SkillUpdateAfterQuery(aq.JsonAfterQuery):
         # Check updated requirements and consumption
         updated_requirements = parsed_answer.get("updated_requirements", {})
         updated_consumption = parsed_answer.get("updated_consumption", {})
-        
-        # Find invalid keys
-        invalid_req_keys = set(updated_requirements.keys()) - available_gains
+
+        # Find invalid keys (exempt level: keys as they are floor constraints, not resource gains)
+        invalid_req_keys = set(k for k in updated_requirements.keys() if not k.startswith("level:")) - available_gains
         invalid_cons_keys = set(updated_consumption.keys()) - available_gains
-        
+
         all_invalid_keys = invalid_req_keys | invalid_cons_keys
-        
+
         is_valid = len(all_invalid_keys) == 0
-        
+
         return is_valid, all_invalid_keys, available_gains
 
     def post_process(self):
@@ -825,8 +825,14 @@ class SkillUpdateAfterQuery(aq.JsonAfterQuery):
 
 
 class KnowledgeBaseUpdateAfterQuery(aq.JsonAfterQuery):
-    """Handles results from propose_knowledge_base_updates prompt"""
-    
+    """
+    DEPRECATED: Handles results from propose_knowledge_base_updates prompt.
+
+    This class is no longer used. Knowledge base updates are now performed directly
+    in Flow._update_skill_in_knowledge_base() during trajectory analysis, rather than
+    via a separate LLM prompt. Kept for backwards compatibility only.
+    """
+
     def __init__(self):
         super().__init__()
         self.type = dict

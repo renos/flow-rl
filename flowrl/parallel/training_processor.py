@@ -15,11 +15,29 @@ import pickle
 import shutil
 import fcntl
 import time
+import re
 from pathlib import Path
 from typing import Dict, Optional
 import json
 
 from flowrl.utils.test import load_policy_params
+
+
+def sanitize_skill_name(skill_name: str) -> str:
+    """
+    Sanitize skill name for use in file paths.
+
+    Args:
+        skill_name: Raw skill name
+
+    Returns:
+        Sanitized name safe for file paths (alphanumeric and underscores only)
+    """
+    # First replace spaces with underscores
+    sanitized = skill_name.replace(' ', '_')
+    # Then remove all non-alphanumeric characters except underscores
+    sanitized = re.sub(r'[^a-zA-Z0-9_]', '', sanitized)
+    return sanitized
 
 
 def save_expert_to_skills(
@@ -43,7 +61,7 @@ def save_expert_to_skills(
         Path to saved expert folder
     """
     base_dir = Path(base_dir)
-    safe_skill_name = skill_name.replace(' ', '_').replace('/', '_')
+    safe_skill_name = sanitize_skill_name(skill_name)
 
     # Create skill folder
     skill_folder = base_dir / "skills" / f"{global_expert_idx}_{safe_skill_name}"
@@ -405,7 +423,7 @@ def _process_completed_training_impl(
                 save_expert_to_skills(global_idx, skill_name, expert_param_subtree, new_total_frames, base_dir)
 
                 # Add to global checkpoint
-                safe_skill_name = skill_name.replace(' ', '_').replace('/', '_')
+                safe_skill_name = skill_name.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '')
                 global_ckpt["skills"][skill_name] = {
                     "expert_idx": global_expert_idx,
                     "skill_with_consumption": remap.get("skill_with_consumption", {}),
@@ -436,7 +454,7 @@ def _process_completed_training_impl(
     print(f"  Global checkpoint updated")
 
     # 7. Archive training artifacts to skills/ folder
-    safe_skill_name = skill_name.replace(' ', '_').replace('/', '_')
+    safe_skill_name = skill_name.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '')
     skill_folder = base_dir / "skills" / f"{global_expert_idx}_{safe_skill_name}"
     skill_folder.mkdir(parents=True, exist_ok=True)
 
@@ -449,6 +467,15 @@ def _process_completed_training_impl(
     log_file = run_folder / "training.log"
     if log_file.exists():
         shutil.copy(log_file, skill_folder / "training.log")
+
+    # Copy trajectory analysis debug files
+    trajectory_debug_file = run_folder / "trajectory_debug.txt"
+    if trajectory_debug_file.exists():
+        shutil.copy(trajectory_debug_file, skill_folder / "trajectory_debug.txt")
+
+    analysis_output_file = run_folder / "analysis_output.pkl"
+    if analysis_output_file.exists():
+        shutil.copy(analysis_output_file, skill_folder / "analysis_output.pkl")
 
     # Copy any videos
     for video_file in run_folder.glob("*.mp4"):
