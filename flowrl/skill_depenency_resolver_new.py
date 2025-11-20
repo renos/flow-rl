@@ -157,6 +157,11 @@ class SkillDependencyResolver:
         # Convert pruned graph to execution order (level-order traversal for just-in-time resource collection)
         execution_order = self._graph_to_execution_order_levelwise(root_node)
 
+        # Optimize execution order by splitting producers to enable consumers earlier (Just-In-Time)
+        # Run multiple passes to ensure convergence
+        for _ in range(3):
+            execution_order = self._optimize_execution_order_simulation(execution_order, processed_skills)
+
         # Old approach (commented out for safety):
         # execution_order = self._graph_to_execution_order(root_node)
 
@@ -463,6 +468,10 @@ class SkillDependencyResolver:
         operators = {}
         for skill_name, skill_data in self.skills.items():
             try:
+                # Ensure skill_name is in skill_data for the converter
+                if "skill_name" not in skill_data:
+                    skill_data["skill_name"] = skill_name
+                
                 operators[skill_name] = convert_skill_to_operator(
                     skill_data,
                     processed_skills=processed_skills,
@@ -667,6 +676,348 @@ class SkillDependencyResolver:
             print(f"  {i+1}. {skill_name} (amount={amount})")
 
         return order
+
+    def _build_dependency_map(self, root_node):
+        """Build a map of skill dependencies from the graph."""
+        deps = {}
+        def traverse(node):
+            if node.skill_name not in deps:
+                deps[node.skill_name] = [child.skill_name for child in node.children]
+                for child in node.children:
+                    traverse(child)
+        traverse(root_node)
+        return deps
+
+    def _get_skill_consumption(self, skill_name, amount=1, skills_map=None):
+        """Get resource consumption for a skill."""
+        skills = skills_map if skills_map is not None else self.skills
+        if skill_name not in skills:
+            return {}
+        skill_data = skills[skill_name]["skill_with_consumption"]
+        consumption_exprs = skill_data.get("consumption", {})
+        consumption = {}
+        for req, expr in consumption_exprs.items():
+            # Only consider inventory items
+            if ":" not in req:
+                val = self._evaluate_lambda_or_expr(expr, amount)
+                if val > 0:
+                    consumption[req] = val
+        return consumption
+    
+    def _get_skill_requirements(self, skill_name, amount=1, skills_map=None):
+        """Get all requirements for a skill (inventory, levels, achievements)."""
+        skills = skills_map if skills_map is not None else self.skills
+        if skill_name not in skills:
+            return {}
+        skill_data = skills[skill_name]["skill_with_consumption"]
+        requirements_exprs = skill_data.get("requirements", {})
+        requirements = {}
+        for req, expr in requirements_exprs.items():
+            if isinstance(expr, (list, tuple)):
+                # For OR conditions (like levels), we can't easily represent as a single number
+                # We'll pass the list through
+                requirements[req] = expr
+            else:
+                val = self._evaluate_lambda_or_expr(expr, amount)
+                if val > 0 or req.startswith("level:"): # Keep level 0 requirements
+                    requirements[req] = val
+        return requirements
+
+    def _get_skill_production(self, skill_name, amount=1, skills_map=None):
+        """Get all production for a skill (inventory, levels, achievements)."""
+        skills = skills_map if skills_map is not None else self.skills
+        if skill_name not in skills:
+            return {}
+        skill_data = skills[skill_name]["skill_with_consumption"]
+        gain = skill_data.get("gain", {})
+        production = {}
+        for item, expr in gain.items():
+            if isinstance(expr, dict):
+                expr = expr.get("expression", "lambda n: n")
+            val = self._evaluate_lambda_or_expr(expr, amount)
+            if val > 0 or item.startswith("level:"):
+                production[item] = val
+        return production
+
+    def _optimize_execution_order_simulation(self, execution_order, processed_skills=None):
+        """
+        Optimize execution order using a "Priority Pull" simulation.
+        
+        Algorithm:
+        1. Maintain a list of 'pending_tasks' (initially the input order).
+        2. Maintain a 'current_state' (inventory, levels, achievements).
+        3. Iteratively select the next task to execute:
+           a. Look for a high-priority "Consumer" task in pending_tasks that can be made executable 
+              by pulling resources from preceding "Producer" tasks.
+           b. If found, "harvest" necessary resources from predecessors (splitting them), 
+              execute the Consumer, and update state.
+           c. If no Consumer can be pulled, execute the first task in pending_tasks.
+        
+        This ensures tools and state changes happen as early as possible (Just-In-Time),
+        while respecting dependencies and floor constraints.
+        """
+        print("\nOptimizing execution order via Priority Pull simulation...")
+        
+        pending_tasks = list(execution_order)
+        scheduled_ops = []
+        
+        # Initial state
+        current_inventory = {}
+        current_state = {} # levels, achievements
+        
+        while pending_tasks:
+            # 1. Try to find a Consumer task to pull forward
+            candidate_idx = -1
+            harvest_plan = None # (producer_idx, amount_to_take) list
+            
+            # We only look ahead a certain distance to avoid complexity? 
+            # For now, scan all.
+            for i, (skill_name, amount) in enumerate(pending_tasks):
+                # Skip the very first task (it's the default choice anyway)
+                if i == 0:
+                    continue
+                
+                # Is this a "Consumer"? 
+                # Heuristic: Consumers have requirements OR change state (level/achievement) OR are tools.
+                # Producers mainly just give inventory.
+                # We want to pull Consumers.
+                if self._is_producer_skill(skill_name, amount, processed_skills):
+                    continue
+                
+                # Check if we can execute this task NOW, potentially by harvesting predecessors
+                can_exec, plan = self._can_execute_with_harvest(
+                    skill_name, amount, 
+                    pending_tasks[:i], # Predecessors
+                    current_inventory, 
+                    current_state,
+                    processed_skills
+                )
+                
+                if can_exec:
+                    candidate_idx = i
+                    harvest_plan = plan
+                    print(f"  Pulling Consumer '{skill_name}' from pos {i}")
+                    break
+            
+            # 2. Execute the chosen task
+            if candidate_idx != -1:
+                # We found a candidate to pull!
+                
+                # First, execute the harvest plan (split/move producers)
+                # Harvest plan is a map: index_in_pending -> amount_to_take
+                # We process from last to first to avoid index shifting issues?
+                # No, we are moving them to scheduled_ops.
+                
+                # We need to be careful. 'pending_tasks[:i]' are the predecessors.
+                # We iterate through them and take what's needed.
+                
+                # Reconstruct predecessors with splits
+                new_pending_prefix = []
+                
+                # Apply harvest
+                for pred_idx in range(candidate_idx):
+                    pred_skill, pred_amount = pending_tasks[pred_idx]
+                    
+                    if pred_idx in harvest_plan:
+                        take_amount = harvest_plan[pred_idx]
+                        if take_amount > 0:
+                            # Schedule the taken amount
+                            self._execute_task(pred_skill, take_amount, current_inventory, current_state, processed_skills)
+                            scheduled_ops.append((pred_skill, take_amount))
+                            print(f"    Harvested '{pred_skill}' ({take_amount})")
+                            
+                            # Keep remainder in pending
+                            remainder = pred_amount - take_amount
+                            if remainder > 0:
+                                new_pending_prefix.append((pred_skill, remainder))
+                        else:
+                            # Take nothing, keep all
+                            new_pending_prefix.append((pred_skill, pred_amount))
+                    else:
+                        # Not harvested, keep in pending
+                        new_pending_prefix.append((pred_skill, pred_amount))
+                
+                # Execute the candidate
+                cand_skill, cand_amount = pending_tasks[candidate_idx]
+                self._execute_task(cand_skill, cand_amount, current_inventory, current_state, processed_skills)
+                scheduled_ops.append((cand_skill, cand_amount))
+                
+                # Update pending tasks
+                # New pending = new_prefix + pending[candidate_idx+1:]
+                pending_tasks = new_pending_prefix + pending_tasks[candidate_idx+1:]
+                
+            else:
+                # No candidate found, execute the first task
+                skill_name, amount = pending_tasks.pop(0)
+                self._execute_task(skill_name, amount, current_inventory, current_state, processed_skills)
+                scheduled_ops.append((skill_name, amount))
+        
+        print("Optimized order:")
+        for i, (s, a) in enumerate(scheduled_ops):
+            print(f"  {i+1}. {s} ({a})")
+            
+        return scheduled_ops
+
+    def _is_producer_skill(self, skill_name, amount, processed_skills):
+        """Check if a skill is primarily a resource producer (low priority)."""
+        prod = self._get_skill_production(skill_name, amount, processed_skills)
+        cons = self._get_skill_consumption(skill_name, amount, processed_skills)
+        reqs = self._get_skill_requirements(skill_name, amount, processed_skills)
+        
+        # If it changes level/achievement, it's a Consumer (state change)
+        for k in prod:
+            if k.startswith("level:") or k.startswith("achievement:"):
+                return False
+        
+        # If it has requirements (tools/infrastructure), it's likely a Consumer
+        # Exception: "Collect Wood" might require "Axe" (if we modeled it), but usually basic collection has no reqs.
+        # If it consumes things, it's a Consumer (crafting).
+        if cons:
+            return False
+            
+        # If it only produces inventory and has no complex requirements, it's a Producer
+        return True
+
+    def _execute_task(self, skill_name, amount, inventory, state, processed_skills):
+        """Update state by 'executing' a task."""
+        prod = self._get_skill_production(skill_name, amount, processed_skills)
+        cons = self._get_skill_consumption(skill_name, amount, processed_skills)
+        
+        # Apply consumption
+        for item, qty in cons.items():
+            inventory[item] = max(0, inventory.get(item, 0) - qty)
+            
+        # Apply production
+        for item, qty in prod.items():
+            if item.startswith("level:"):
+                state[item] = qty
+            elif item.startswith("achievement:"):
+                state[item] = max(state.get(item, 0), qty)
+            else:
+                inventory[item] = inventory.get(item, 0) + qty
+
+    def _can_execute_with_harvest(self, skill_name, amount, predecessors, current_inventory, current_state, processed_skills):
+        """
+        Check if a task can be executed by harvesting resources from predecessors.
+        Returns (bool, harvest_plan) where harvest_plan is {pred_index: amount_to_take}.
+        """
+        reqs = self._get_skill_requirements(skill_name, amount, processed_skills)
+        cons = self._get_skill_consumption(skill_name, amount, processed_skills)
+        
+        # 1. Check State Requirements (Level/Achievement)
+        # These MUST be met by current_state (we assume predecessors don't change state, or if they do, we can't skip them easily)
+        # Actually, if a predecessor changes state (e.g. Descend), and we need that state, we can't pull past it.
+        # If we need a state that is NOT met, we can't execute.
+        for req, val in reqs.items():
+            if req.startswith("level:"):
+                curr = current_state.get(req, 0)
+                if isinstance(val, (list, tuple)):
+                    if curr not in val: return False, None
+                elif curr != val: return False, None
+            elif req.startswith("achievement:"):
+                if current_state.get(req, 0) < val: return False, None
+        
+        # 2. Check Floor Constraints for Predecessors
+        # We cannot pull 'skill_name' past a predecessor 'P' if:
+        # a. 'P' requires a specific floor, AND 'skill_name' changes the floor (e.g. Descend).
+        #    (If we pull Descend before P, P will fail).
+        # b. 'skill_name' requires a specific floor, AND 'P' changes the floor.
+        #    (If we pull skill before P, skill might fail if it needed P's floor change).
+        
+        my_floor_req = self._get_skill_floor_requirement(skill_name)
+        am_i_transition, my_target_floor = self._is_floor_transition_skill(skill_name)
+        
+        for i, (pred_name, _) in enumerate(predecessors):
+            pred_floor_req = self._get_skill_floor_requirement(pred_name)
+            is_pred_trans, pred_target_floor = self._is_floor_transition_skill(pred_name)
+            
+            # Case A: I change floor, Pred needs floor.
+            if am_i_transition and pred_floor_req is not None:
+                # If I execute before Pred, I change the floor.
+                # Pred needs 'pred_floor_req'.
+                # If I change to a floor != pred_floor_req, Pred is broken.
+                # Usually Descend goes 0->1. Pred needs 0.
+                # If I pull Descend, I'm on 1. Pred needs 0. Fail.
+                # So if I am transition, and Pred has ANY floor req, I can't jump it?
+                # Unless I transition TO the floor Pred needs? (Unlikely for Descend).
+                # Safe heuristic: Don't jump floor-dependent tasks if I change floor.
+                return False, None
+                
+            # Case B: I need floor, Pred changes floor.
+            # If I jump Pred, I execute BEFORE Pred changes floor.
+            # So I use the CURRENT floor.
+            # If my req != current floor, I can't execute yet.
+            # But this is covered by "Check State Requirements" above? 
+            # Floor is usually tracked in 'level:player_level' or similar?
+            # If 'level:player_level' is in current_state, we checked it.
+            # But `_get_skill_floor_requirement` might check a different key or logic.
+            # Let's explicitly check my floor req against current state.
+            if my_floor_req is not None:
+                # Assuming current_state tracks floor? 
+                # If not, we rely on the fact that we are in a valid sequence.
+                # If I need floor X, and I'm currently at floor Y (in current_state).
+                # If X != Y, I can't execute.
+                # We need to know current floor from current_state.
+                # Let's assume 'level:dungeon_level' or similar is in current_state.
+                # Or we trust `_get_skill_requirements` included the floor level req.
+                pass
+
+        # 3. Calculate Inventory Needs
+        # Need = (Consumption + Requirements) - Current_Inventory
+        needed = {}
+        for item, qty in cons.items():
+            needed[item] = needed.get(item, 0) + qty
+        for item, qty in reqs.items():
+            if not item.startswith("level:") and not item.startswith("achievement:"):
+                needed[item] = max(needed.get(item, 0), qty)
+        
+        missing = {}
+        for item, qty in needed.items():
+            have = current_inventory.get(item, 0)
+            if have < qty:
+                missing[item] = qty - have
+        
+        if not missing:
+            return True, {} # No harvest needed
+            
+        # 4. Try to Harvest from Predecessors
+        harvest_plan = {}
+        
+        for item, amount_needed in missing.items():
+            amount_found = 0
+            
+            # Scan predecessors to find this item
+            for i, (pred_name, pred_amount) in enumerate(predecessors):
+                prod = self._get_skill_production(pred_name, pred_amount, processed_skills)
+                if item in prod:
+                    # How much does it produce per unit?
+                    # Assuming linear: total_prod / pred_amount
+                    total_prod = prod[item]
+                    if total_prod <= 0: continue
+                    
+                    per_unit = total_prod / pred_amount
+                    
+                    # How much do we need from this specific producer?
+                    remaining_need = amount_needed - amount_found
+                    
+                    # How many units of pred do we need to take?
+                    units_to_take = int(ceil(remaining_need / per_unit))
+                    units_to_take = min(units_to_take, pred_amount)
+                    
+                    # Record harvest
+                    # If we already taking from this pred (for another item), take max
+                    current_take = harvest_plan.get(i, 0)
+                    harvest_plan[i] = max(current_take, units_to_take)
+                    
+                    amount_found += units_to_take * per_unit
+                    
+                    if amount_found >= amount_needed:
+                        break
+            
+            if amount_found < amount_needed:
+                return False, None # Cannot satisfy requirements
+                
+        return True, harvest_plan
 
     def _collect_skill_and_dependencies(self, skill_name, skill_pos, order, skill_dependencies, required_floor):
         """
@@ -1724,6 +2075,18 @@ class SkillDependencyResolver:
     def _evaluate_lambda(self, lambda_str, n):
         """Evaluate a lambda function string with the given n value."""
         try:
+            # Handle list/tuple inputs (e.g. for OR conditions in levels)
+            if isinstance(lambda_str, (list, tuple)):
+                if not lambda_str:
+                    return 0
+                try:
+                    return int(min(lambda_str))
+                except:
+                    return 0
+
+            if isinstance(lambda_str, (int, float)):
+                return int(lambda_str * n)
+
             lambda_func = eval(lambda_str)
             return lambda_func(n)
         except Exception as e:
@@ -1733,6 +2096,15 @@ class SkillDependencyResolver:
     def _evaluate_lambda_or_expr(self, expr, n):
         """Evaluate a lambda function string or expression with the given n value."""
         try:
+            # Handle list/tuple inputs (e.g. for OR conditions in levels)
+            if isinstance(expr, (list, tuple)):
+                if not expr:
+                    return 0
+                try:
+                    return int(min(expr))
+                except:
+                    return 0
+
             if isinstance(expr, str):
                 if expr == "n":
                     return n
